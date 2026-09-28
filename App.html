@@ -1,0 +1,384 @@
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Estado ----------
+  const estado = {
+    dados: [], periodo: 'mes', ref: new Date(), campo: 'da',
+    cliente: '', operador: '', busca: '', nivel: 2, ordem: { col: 'data', dir: -1 }, graficos: {}
+  };
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtData = ms => ms ? new Date(ms).toLocaleDateString('pt-BR') : '';
+  const fmtDataHora = ms => ms ? new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+  const media = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const fmtMedia = v => v == null ? '–' : v.toFixed(1).replace('.', ',');
+  const classeNota = n => n == null ? '' : n >= 9 ? 'b' : n >= 7 ? 'm' : 'r';
+  const resolvido = c => c.st === 'Resolvido';
+  const cancelado = c => /cancelad/i.test(c.st);
+  const emAberto = c => !resolvido(c) && !cancelado(c);
+  const classeStatus = st => st === 'Resolvido' ? 'Resolvido' : /cancelad/i.test(st) ? 'Cancelado' : 'Aberto';
+  const nivelAssunto = (as, n) => as ? as.split(' - ').slice(0, n).join(' - ') : '(sem assunto)';
+  const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+  // Backend: Apps Script ou dados de exemplo quando aberto fora do Google
+  const noGoogle = typeof google !== 'undefined' && google.script && google.script.run;
+  function chamar(fn, ...args) {
+    return new Promise((ok, erro) => {
+      if (!noGoogle) return ok(window.MOCK[fn](...args));
+      google.script.run.withSuccessHandler(ok).withFailureHandler(erro)[fn](...args);
+    });
+  }
+
+  // ---------- Período ----------
+  function intervalo() {
+    const r = new Date(estado.ref); r.setHours(0, 0, 0, 0);
+    let ini, fim;
+    switch (estado.periodo) {
+      case 'dia': ini = r; fim = new Date(r); fim.setDate(fim.getDate() + 1); break;
+      case 'semana': {
+        ini = new Date(r); ini.setDate(r.getDate() - ((r.getDay() + 6) % 7));
+        fim = new Date(ini); fim.setDate(ini.getDate() + 7); break;
+      }
+      case 'mes': ini = new Date(r.getFullYear(), r.getMonth(), 1); fim = new Date(r.getFullYear(), r.getMonth() + 1, 1); break;
+      case 'ano': ini = new Date(r.getFullYear(), 0, 1); fim = new Date(r.getFullYear() + 1, 0, 1); break;
+      case 'custom': {
+        const a = $('#dt-ini').value, b = $('#dt-fim').value;
+        ini = a ? new Date(a + 'T00:00:00') : null;
+        fim = b ? new Date(b + 'T00:00:00') : null;
+        if (fim) fim.setDate(fim.getDate() + 1);
+        break;
+      }
+      default: ini = null; fim = null;
+    }
+    return { ini, fim };
+  }
+
+  function rotuloPeriodo({ ini, fim }) {
+    const r = estado.ref;
+    switch (estado.periodo) {
+      case 'dia': return r.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+      case 'semana': { const f = new Date(fim); f.setDate(f.getDate() - 1); return fmtData(ini) + ' – ' + fmtData(f); }
+      case 'mes': return r.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+      case 'ano': return String(r.getFullYear());
+      default: return '';
+    }
+  }
+
+  function mover(delta) {
+    const r = new Date(estado.ref);
+    if (estado.periodo === 'dia') r.setDate(r.getDate() + delta);
+    if (estado.periodo === 'semana') r.setDate(r.getDate() + 7 * delta);
+    if (estado.periodo === 'mes') r.setMonth(r.getMonth() + delta, 1);
+    if (estado.periodo === 'ano') r.setFullYear(r.getFullYear() + delta);
+    estado.ref = r; render();
+  }
+
+  // Data de referência do chamado conforme o campo escolhido (com alternativas se vazio)
+  function dataRef(c) {
+    if (estado.campo === 'dv') return c.dv;
+    if (estado.campo === 'dr') return c.dr || null;
+    return c.da || c.dr || c.dv;
+  }
+
+  function filtrar() {
+    const { ini, fim } = intervalo();
+    const cli = estado.cliente.trim().toLowerCase();
+    const q = estado.busca.trim().toLowerCase();
+    return estado.dados.filter(c => {
+      const d = dataRef(c);
+      if (!d) return false;
+      if (ini && d < ini.getTime()) return false;
+      if (fim && d >= fim.getTime()) return false;
+      if (cli && c.cl.toLowerCase() !== cli) return false;
+      if (estado.operador && c.op !== estado.operador) return false;
+      if (q && ![c.n, c.as, c.so, c.cl, c.op, c.gr, c.co].join(' ').toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+
+  // ---------- Render ----------
+  function render() {
+    const iv = intervalo();
+    $('#rotulo-periodo').textContent = rotuloPeriodo(iv);
+    $('#nav-periodo').style.display = ['tudo', 'custom'].includes(estado.periodo) ? 'none' : '';
+    $('#custom').hidden = estado.periodo !== 'custom';
+    document.querySelectorAll('#periodos button').forEach(b => b.classList.toggle('ativo', b.dataset.p === estado.periodo));
+
+    const lista = filtrar();
+    renderKpis(lista);
+    renderEvolucao(lista, iv);
+    renderRanking('g-clientes', contar(lista, c => c.cl || '(sem cliente)'), '#1f6feb');
+    renderRanking('g-solicitantes', contar(lista, c => c.so ? c.so + (c.cl ? ' · ' + c.cl : '') : '(sem solicitante)'), '#8250df');
+    renderRanking('g-classif', contar(lista, c => nivelAssunto(c.as, estado.nivel)), '#1a7f37');
+    renderNotas(lista);
+    renderTabelaClientes(lista);
+    renderTabelaChamados(lista);
+    renderComentarios(lista);
+  }
+
+  function contar(lista, chave) {
+    const m = {};
+    lista.forEach(c => { const k = chave(c); m[k] = (m[k] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }
+
+  function renderKpis(lista) {
+    const resolvidos = lista.filter(resolvido).length;
+    const comRc = lista.filter(c => c.rc);
+    const rcOk = comRc.filter(c => /^resolvido/i.test(c.rc)).length;
+    const avaliados = lista.filter(c => c.na != null || c.ns != null);
+    const na = media(avaliados.map(c => c.na).filter(v => v != null));
+    const ns = media(avaliados.map(c => c.ns).filter(v => v != null));
+    const clientes = new Set(lista.map(c => c.cl).filter(Boolean)).size;
+    const taxa = resolvidos ? Math.round(100 * avaliados.length / resolvidos) + '% dos resolvidos' : '';
+    const k = [
+      ['Chamados', lista.length, ''],
+      ['Resolvidos', resolvidos, ''],
+      ['Em aberto', lista.filter(emAberto).length, ''],
+      ['Cancelados', lista.filter(cancelado).length, ''],
+      ['Avaliações', avaliados.length, taxa],
+      ['Nota atendimento', fmtMedia(na), 'média (1 a 10)'],
+      ['Nota sistema ERP', fmtMedia(ns), 'média (1 a 10)'],
+      ['Resolvido p/ cliente', comRc.length ? Math.round(100 * rcOk / comRc.length) + '%' : '–', comRc.length ? rcOk + ' de ' + comRc.length + ' avaliações' : ''],
+      ['Clientes atendidos', clientes, '']
+    ];
+    $('#kpis').innerHTML = k.map(([l, v, s]) =>
+      `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${s}</div></div>`).join('');
+  }
+
+  function grafico(id, config) {
+    if (estado.graficos[id]) estado.graficos[id].destroy();
+    if (typeof Chart === 'undefined') return;
+    const cor = getComputedStyle(document.body).color;
+    Chart.defaults.color = cor;
+    Chart.defaults.borderColor = 'rgba(128,128,128,.15)';
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    estado.graficos[id] = new Chart(document.getElementById(id), config);
+  }
+
+  function renderEvolucao(lista, { ini, fim }) {
+    // Granularidade: hora (dia), dia (semana/mês/≤62 dias), mês (demais)
+    let chaves = [], rotulos = [], chaveDe;
+    const p = estado.periodo;
+    const dias = ini && fim ? (fim - ini) / 864e5 : null;
+    if (p === 'dia') {
+      for (let h = 0; h < 24; h++) { chaves.push(h); rotulos.push(h + 'h'); }
+      chaveDe = d => new Date(d).getHours();
+    } else if (dias != null && dias <= 62) {
+      for (let d = new Date(ini); d < fim; d.setDate(d.getDate() + 1)) {
+        chaves.push(d.toDateString());
+        rotulos.push(String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'));
+      }
+      chaveDe = d => new Date(d).toDateString();
+    } else {
+      const ts = lista.map(dataRef);
+      let a = ini || (ts.length ? new Date(Math.min(...ts)) : new Date());
+      let b = fim || (ts.length ? new Date(Math.max(...ts)) : new Date());
+      a = new Date(a.getFullYear(), a.getMonth(), 1);
+      for (let d = new Date(a); d < b; d.setMonth(d.getMonth() + 1)) {
+        chaves.push(d.getFullYear() + '-' + d.getMonth());
+        rotulos.push(MESES[d.getMonth()] + '/' + String(d.getFullYear()).slice(2));
+      }
+      chaveDe = d => { const x = new Date(d); return x.getFullYear() + '-' + x.getMonth(); };
+    }
+    const idx = {}; chaves.forEach((k, i) => idx[k] = i);
+    const res = chaves.map(() => 0), abe = chaves.map(() => 0), can = chaves.map(() => 0);
+    lista.forEach(c => {
+      const i = idx[chaveDe(dataRef(c))];
+      if (i == null) return;
+      (resolvido(c) ? res : cancelado(c) ? can : abe)[i]++;
+    });
+    grafico('g-evolucao', {
+      type: 'bar',
+      data: { labels: rotulos, datasets: [
+        { label: 'Resolvidos', data: res, backgroundColor: '#1f6feb', borderRadius: 3, stack: 's' },
+        { label: 'Em aberto', data: abe, backgroundColor: '#f0a33a', borderRadius: 3, stack: 's' },
+        { label: 'Cancelados', data: can, backgroundColor: '#9aa3b2', borderRadius: 3, stack: 's' }
+      ] },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+                 scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } }
+    });
+  }
+
+  function renderRanking(id, pares, cor) {
+    const top = pares.slice(0, 10);
+    grafico(id, {
+      type: 'bar',
+      data: { labels: top.map(p => p[0].length > 38 ? p[0].slice(0, 36) + '…' : p[0]),
+              datasets: [{ data: top.map(p => p[1]), backgroundColor: cor, borderRadius: 3 }] },
+      options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } },
+                 scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { grid: { display: false } } } }
+    });
+  }
+
+  function renderNotas(lista) {
+    const faixa = Array.from({ length: 11 }, (_, i) => i);
+    const cont = campo => faixa.map(n => lista.filter(c => c[campo] === n).length);
+    grafico('g-notas', {
+      type: 'bar',
+      data: { labels: faixa.map(String), datasets: [
+        { label: 'Atendimento', data: cont('na'), backgroundColor: '#1f6feb', borderRadius: 3 },
+        { label: 'Sistema ERP', data: cont('ns'), backgroundColor: '#8250df', borderRadius: 3 }
+      ] },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+                 scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false }, title: { display: true, text: 'Nota' } } } }
+    });
+  }
+
+  function renderTabelaClientes(lista) {
+    const m = {};
+    lista.forEach(c => {
+      const k = c.cl || '(sem cliente)';
+      const r = m[k] || (m[k] = { cl: k, qt: 0, res: 0, av: 0, na: [], ns: [], sol: {} });
+      r.qt++; if (resolvido(c)) r.res++;
+      if (c.na != null || c.ns != null) r.av++;
+      if (c.na != null) r.na.push(c.na);
+      if (c.ns != null) r.ns.push(c.ns);
+      if (c.so) r.sol[c.so] = (r.sol[c.so] || 0) + 1;
+    });
+    const linhas = Object.values(m).sort((a, b) => b.qt - a.qt);
+    const nota = v => { const x = media(v); return `<span class="nota ${classeNota(x)}">${fmtMedia(x)}</span>`; };
+    $('#t-clientes').innerHTML = `<thead><tr><th>Cliente</th><th class="num">Chamados</th><th class="num">Resolvidos</th>
+      <th class="num">Avaliações</th><th class="num">Nota atend.</th><th class="num">Nota sistema</th><th>Quem mais contatou</th></tr></thead><tbody>` +
+      (linhas.length ? linhas.map(r => {
+        const top = Object.entries(r.sol).sort((a, b) => b[1] - a[1])[0];
+        return `<tr><td>${esc(r.cl)}</td><td class="num">${r.qt}</td><td class="num">${r.res}</td><td class="num">${r.av}</td>
+          <td class="num">${nota(r.na)}</td><td class="num">${nota(r.ns)}</td><td>${top ? esc(top[0]) + ' (' + top[1] + ')' : ''}</td></tr>`;
+      }).join('') : '<tr><td colspan="7" class="vazio">Nenhum chamado no período</td></tr>') + '</tbody>';
+  }
+
+  const COLS = [
+    ['n', 'Nº'], ['data', 'Data'], ['st', 'Status'], ['cl', 'Cliente'], ['so', 'Solicitante'],
+    ['op', 'Operador'], ['as', 'Assunto / classificação'], ['na', 'Nota atend.'], ['ns', 'Nota sist.']
+  ];
+
+  function renderTabelaChamados(lista) {
+    const { col, dir } = estado.ordem;
+    const val = c => col === 'data' ? dataRef(c) : c[col];
+    const ord = lista.slice().sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null || x === '') return 1;
+      if (y == null || y === '') return -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * dir;
+    });
+    $('#qtd-chamados').textContent = '(' + lista.length + ')';
+    const seta = k => k === col ? (dir > 0 ? ' ▲' : ' ▼') : '';
+    const nota = n => n == null ? '' : `<span class="nota ${classeNota(n)}">${n}</span>`;
+    $('#t-chamados').innerHTML = '<thead><tr>' + COLS.map(([k, l]) => `<th data-col="${k}">${l}${seta(k)}</th>`).join('') + '</tr></thead><tbody>' +
+      (ord.length ? ord.map(c => `<tr data-n="${esc(c.n)}"><td>${esc(c.n)}</td><td>${fmtData(dataRef(c))}</td>
+        <td><span class="tag ${classeStatus(c.st)}">${esc(c.st)}</span></td><td>${esc(c.cl)}</td><td>${esc(c.so)}</td>
+        <td>${esc(c.op)}</td><td class="quebra">${esc(c.as)}</td><td class="num">${nota(c.na)}</td><td class="num">${nota(c.ns)}</td></tr>`).join('')
+        : '<tr><td colspan="9" class="vazio">Nenhum chamado no período</td></tr>') + '</tbody>';
+  }
+
+  function renderComentarios(lista) {
+    const cs = lista.filter(c => c.co).sort((a, b) => (b.dv || 0) - (a.dv || 0)).slice(0, 30);
+    $('#comentarios').innerHTML = cs.length ? cs.map(c => `<div class="coment"><div>${esc(c.co)}</div>
+      <div class="meta">${esc(c.n)} · ${esc(c.cl)} · ${esc(c.so)} · ${esc(c.op)} · atendimento ${c.na ?? '–'} / sistema ${c.ns ?? '–'}${c.rc ? ' · ' + esc(c.rc) : ''} · ${fmtData(c.dv)}</div></div>`).join('')
+      : '<div class="vazio">Nenhum comentário no período</div>';
+  }
+
+  // ---------- Detalhe ----------
+  async function abrirDetalhe(numero) {
+    $('#modal').hidden = false;
+    $('#modal-conteudo').innerHTML = '<p>Carregando chamado ' + esc(numero) + '…</p>';
+    try {
+      const d = await chamar('getDetalhe', numero);
+      const campo = (l, v) => `<div><b>${l}</b>${esc(v) || '–'}</div>`;
+      const abas = d.emails.map((e, i) => ({ id: 'e' + i, rotulo: 'Email: ' + e.rotulo })).concat([{ id: 'resumo', rotulo: 'Conversa (texto)' }]);
+      $('#modal-conteudo').innerHTML = `
+        <h2 style="font-size:18px">Chamado ${esc(d.numero)} <span class="tag ${classeStatus(d.status)}">${esc(d.status)}</span></h2>
+        <div>${esc(d.assunto)}</div>
+        <div class="det-grid">
+          ${campo('Cliente', d.cliente)}${campo('Solicitante', d.solicitante)}${campo('Operador', d.operador)}
+          ${campo('Grupo', d.grupo)}${campo('Ação realizada', d.descricaoAcao)}${campo('Abertura', fmtDataHora(d.dataAbertura))}
+          ${campo('Resolução', fmtDataHora(d.dataResolucao))}${campo('Avaliação', fmtDataHora(d.dataAvaliacao))}
+          ${campo('Nota atendimento', d.notaAtendimento)}${campo('Nota sistema', d.notaSistema)}${campo('Resolvido p/ cliente', d.resolucaoCliente)}
+        </div>
+        ${d.comentario ? `<div class="coment">${esc(d.comentario)}</div>` : ''}
+        <div class="abas grupo">${abas.map((a, i) => `<button data-aba="${a.id}" class="${i ? '' : 'ativo'}">${a.rotulo}</button>`).join('')}</div>
+        <div data-painel="resumo" ${d.emails.length ? 'hidden' : ''}><pre class="resumo">${esc(d.resumo) || 'Sem resumo.'}</pre></div>
+        ${d.emails.map((e, i) => `<div data-painel="e${i}" ${i ? 'hidden' : ''}>
+          ${e.erro ? `<p>${esc(e.erro)}</p>` : `
+            <div class="sub">${esc(e.assunto)} · ${fmtDataHora(e.data)} · <a href="${esc(e.link)}" target="_blank">abrir no Gmail</a></div>
+            <iframe class="email-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>`}
+        </div>`).join('')}`;
+      d.emails.forEach((e, i) => {
+        const f = document.querySelector(`[data-painel="e${i}"] iframe`);
+        if (f) f.srcdoc = '<base target="_blank">' + e.html;
+      });
+      document.querySelectorAll('.abas button').forEach(b => b.onclick = () => {
+        document.querySelectorAll('.abas button').forEach(x => x.classList.toggle('ativo', x === b));
+        document.querySelectorAll('[data-painel]').forEach(p => p.hidden = p.dataset.painel !== b.dataset.aba);
+      });
+    } catch (e) {
+      $('#modal-conteudo').innerHTML = '<p>Erro: ' + esc(e.message || e) + '</p>';
+    }
+  }
+
+  // ---------- CSV ----------
+  function exportarCsv() {
+    const lista = filtrar();
+    const cab = ['Numero', 'Status', 'Cliente', 'Solicitante', 'Operador', 'Grupo', 'Assunto', 'Abertura', 'Resolucao', 'Avaliacao', 'Nota atendimento', 'Nota sistema', 'Resolvido p/ cliente', 'Comentario'];
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const linhas = lista.map(c => [c.n, c.st, c.cl, c.so, c.op, c.gr, c.as, fmtDataHora(c.da), fmtDataHora(c.dr), fmtDataHora(c.dv), c.na, c.ns, c.rc, c.co].map(q).join(';'));
+    const blob = new Blob(['﻿' + [cab.join(';')].concat(linhas).join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'chamados.csv'; a.click();
+  }
+
+  // ---------- Carga ----------
+  async function carregar() {
+    const r = await chamar('getDados');
+    estado.dados = r.chamados;
+    $('#link-planilha').href = r.planilhaUrl;
+    $('#status-sync').textContent = (r.ultimaSync ? 'Última sincronização: ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
+      (r.importando ? ' · importação em andamento…' : '') + ' · ' + r.chamados.length + ' chamados';
+    const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const ops = contar(estado.dados.filter(c => c.op), c => c.op);
+    const meu = contar(estado.dados.filter(c => c.eu && c.op), c => c.op)[0];
+    let salvo = null; try { salvo = localStorage.getItem('painel.operador'); } catch (e) { /* sem storage */ }
+    if (!estado.carregado) estado.operador = salvo != null ? salvo : (meu ? meu[0] : '');
+    estado.carregado = true;
+    $('#f-operador').innerHTML = '<option value="">Todos</option>' + ops.map(([o, n]) => `<option value="${esc(o)}">${esc(o)} (${n})</option>`).join('');
+    $('#f-operador').value = estado.operador;
+    $('#lista-clientes').innerHTML = clientes.map(c => `<option value="${esc(c)}">`).join('');
+    render();
+  }
+
+  // ---------- Eventos ----------
+  document.querySelectorAll('#periodos button').forEach(b => b.onclick = () => { estado.periodo = b.dataset.p; render(); });
+  $('#ant').onclick = () => mover(-1);
+  $('#prox').onclick = () => mover(1);
+  $('#dt-ini').onchange = $('#dt-fim').onchange = render;
+  $('#campo-data').onchange = e => { estado.campo = e.target.value; render(); };
+  $('#f-cliente').oninput = e => { estado.cliente = e.target.value; render(); };
+  $('#f-operador').onchange = e => { estado.operador = e.target.value; try { localStorage.setItem('painel.operador', estado.operador); } catch (x) { /* sem storage */ } render(); };
+  $('#nivel-classif').onchange = e => { estado.nivel = Number(e.target.value); render(); };
+  $('#f-busca').oninput = e => { estado.busca = e.target.value; render(); };
+  $('#t-chamados').onclick = e => {
+    const th = e.target.closest('th');
+    if (th) {
+      const col = th.dataset.col;
+      estado.ordem = { col, dir: estado.ordem.col === col ? -estado.ordem.dir : -1 };
+      return renderTabelaChamados(filtrar());
+    }
+    const tr = e.target.closest('tr[data-n]');
+    if (tr) abrirDetalhe(tr.dataset.n);
+  };
+  $('#fechar-modal').onclick = () => $('#modal').hidden = true;
+  $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').hidden = true; };
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').hidden = true; });
+  $('#btn-csv').onclick = exportarCsv;
+  $('#btn-sync').onclick = async () => {
+    const b = $('#btn-sync');
+    b.disabled = true; b.textContent = 'Sincronizando…';
+    try { const msg = await chamar('sincronizarAgora'); await carregar(); $('#status-sync').textContent += ' · ' + msg; }
+    catch (e) { alert('Erro ao sincronizar: ' + (e.message || e)); }
+    finally { b.disabled = false; b.textContent = 'Sincronizar agora'; }
+  };
+
+  carregar().catch(e => { $('#status-sync').textContent = 'Erro ao carregar: ' + (e.message || e); });
+})();
+</script>
