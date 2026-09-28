@@ -36,6 +36,7 @@ function getDados() {
   const props = PropertiesService.getScriptProperties();
   return {
     chamados: lista,
+    contagens: lerContagens_(),
     ultimaSync: Number(props.getProperty('ULTIMA_SYNC') || 0),
     importando: !!props.getProperty('OFFSET_BUSCA'),
     planilhaUrl: planilha_().getUrl()

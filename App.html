@@ -4,7 +4,7 @@
 
   // ---------- Estado ----------
   const estado = {
-    dados: [], periodo: 'mes', ref: new Date(), campo: 'da',
+    dados: [], contagens: [], contagem: 0, periodo: 'mes', ref: new Date(), campo: 'da',
     cliente: '', operador: '', busca: '', nivel: 2, ordem: { col: 'data', dir: -1 }, graficos: {}
   };
   const $ = s => document.querySelector(s);
@@ -35,6 +35,12 @@
     const r = new Date(estado.ref); r.setHours(0, 0, 0, 0);
     let ini, fim;
     switch (estado.periodo) {
+      case 'contagem': {
+        const k = estado.contagens, i = estado.contagem;
+        ini = k[i] != null ? new Date(k[i]) : null;
+        fim = k[i + 1] != null ? new Date(k[i + 1]) : null;
+        break;
+      }
       case 'dia': ini = r; fim = new Date(r); fim.setDate(fim.getDate() + 1); break;
       case 'semana': {
         ini = new Date(r); ini.setDate(r.getDate() - ((r.getDay() + 6) % 7));
@@ -57,6 +63,12 @@
   function rotuloPeriodo({ ini, fim }) {
     const r = estado.ref;
     switch (estado.periodo) {
+      case 'contagem': {
+        if (!ini) return 'Contagem atual (início ainda não registrado)';
+        const n = estado.contagem + 1;
+        return fim ? 'Contagem ' + n + ': ' + fmtDataHora(ini) + ' – ' + fmtDataHora(fim)
+                   : 'Contagem ' + n + ' (atual): desde ' + fmtDataHora(ini);
+      }
       case 'dia': return r.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
       case 'semana': { const f = new Date(fim); f.setDate(f.getDate() - 1); return fmtData(ini) + ' – ' + fmtData(f); }
       case 'mes': return r.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
@@ -66,6 +78,10 @@
   }
 
   function mover(delta) {
+    if (estado.periodo === 'contagem') {
+      estado.contagem = Math.max(0, Math.min(ultimaContagem(), estado.contagem + delta));
+      return render();
+    }
     const r = new Date(estado.ref);
     if (estado.periodo === 'dia') r.setDate(r.getDate() + delta);
     if (estado.periodo === 'semana') r.setDate(r.getDate() + 7 * delta);
@@ -73,6 +89,9 @@
     if (estado.periodo === 'ano') r.setFullYear(r.getFullYear() + delta);
     estado.ref = r; render();
   }
+
+  // Índice da contagem atual (em aberto)
+  const ultimaContagem = () => Math.max(0, estado.contagens.length - 1);
 
   // Data de referência do chamado conforme o campo escolhido (com alternativas se vazio)
   function dataRef(c) {
@@ -104,6 +123,12 @@
     $('#nav-periodo').style.display = ['tudo', 'custom'].includes(estado.periodo) ? 'none' : '';
     $('#custom').hidden = estado.periodo !== 'custom';
     document.querySelectorAll('#periodos button').forEach(b => b.classList.toggle('ativo', b.dataset.p === estado.periodo));
+    if (estado.periodo === 'contagem') {
+      $('#ant').disabled = estado.contagem <= 0;
+      $('#prox').disabled = estado.contagem >= ultimaContagem();
+    } else {
+      $('#ant').disabled = $('#prox').disabled = false;
+    }
 
     const lista = filtrar();
     renderKpis(lista);
@@ -161,6 +186,11 @@
     // Granularidade: hora (dia), dia (semana/mês/≤62 dias), mês (demais)
     let chaves = [], rotulos = [], chaveDe;
     const p = estado.periodo;
+    // Contagens começam/terminam em qualquer horário: o gráfico usa dias inteiros (até hoje, se em aberto)
+    if (p === 'contagem' && ini) {
+      ini = new Date(ini); ini.setHours(0, 0, 0, 0);
+      fim = new Date(fim || Date.now()); if (fim.getHours() || fim.getMinutes() || fim.getSeconds()) { fim.setHours(0, 0, 0, 0); fim.setDate(fim.getDate() + 1); }
+    }
     const dias = ini && fim ? (fim - ini) / 864e5 : null;
     if (p === 'dia') {
       for (let h = 0; h < 24; h++) { chaves.push(h); rotulos.push(h + 'h'); }
@@ -328,10 +358,71 @@
     a.href = URL.createObjectURL(blob); a.download = 'chamados.csv'; a.click();
   }
 
+  // ---------- Encerrar contagem ----------
+  function abrirEncerrar() {
+    const atual = estado.contagens[estado.contagens.length - 1];
+    const primeira = atual == null;
+    const agora = new Date();
+    const local = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+    let resumo = '';
+    if (!primeira) {
+      const doCiclo = campo => estado.dados.filter(c => c[campo] && c[campo] >= atual);
+      const av = doCiclo('dv').filter(c => c.na != null || c.ns != null);
+      resumo = `<p>Contagem atual: desde <b>${fmtDataHora(atual)}</b> (todos os operadores)</p>
+        <div class="det-grid">
+          <div><b>Chamados abertos</b>${doCiclo('da').length}</div>
+          <div><b>Chamados resolvidos</b>${doCiclo('dr').filter(resolvido).length}</div>
+          <div><b>Avaliações</b>${av.length}</div>
+          <div><b>Nota atendimento</b>${fmtMedia(media(av.map(c => c.na).filter(v => v != null)))}</div>
+          <div><b>Nota sistema</b>${fmtMedia(media(av.map(c => c.ns).filter(v => v != null)))}</div>
+        </div>`;
+    }
+    $('#modal').hidden = false;
+    $('#modal-conteudo').innerHTML = `
+      <h2 style="font-size:18px">Encerrar contagem</h2>
+      ${primeira ? `<p>Ainda não há contagem registrada. Informe quando a contagem atual começou:</p>
+        <p><input type="datetime-local" id="enc-inicio" max="${local(agora)}"></p>` : resumo}
+      <p>A contagem atual será encerrada <b>agora (${fmtDataHora(agora)})</b> e uma nova contagem começa no mesmo instante.
+        Chamados e avaliações a partir de agora entram na nova contagem.</p>
+      <p class="sub">Se encerrar por engano, corrija a aba "Contagens" da planilha.</p>
+      <div class="acoes"><button class="btn" id="enc-confirmar">Encerrar e iniciar nova contagem</button>
+        <button class="btn btn-sec" id="enc-cancelar">Cancelar</button></div>`;
+    $('#enc-cancelar').onclick = () => $('#modal').hidden = true;
+    $('#enc-confirmar').onclick = async () => {
+      let inicio = null;
+      if (primeira) {
+        const v = $('#enc-inicio').value;
+        if (!v) return alert('Informe o início da contagem atual.');
+        inicio = new Date(v).getTime();
+      }
+      const b = $('#enc-confirmar');
+      b.disabled = true; b.textContent = 'Encerrando…';
+      try {
+        estado.contagens = await chamar('encerrarContagem', inicio);
+        // Mostra a contagem que acabou de ser encerrada, com os números finais
+        estado.periodo = 'contagem';
+        estado.contagem = Math.max(0, estado.contagens.length - 2);
+        $('#modal').hidden = true;
+        render();
+      } catch (e) {
+        alert('Erro ao encerrar: ' + (e.message || e));
+        b.disabled = false; b.textContent = 'Encerrar e iniciar nova contagem';
+      }
+    };
+  }
+
   // ---------- Carga ----------
   async function carregar() {
     const r = await chamar('getDados');
     estado.dados = r.chamados;
+    const eraUltima = estado.contagem >= ultimaContagem();
+    estado.contagens = r.contagens || [];
+    if (!estado.carregado) {
+      if (estado.contagens.length) estado.periodo = 'contagem';
+      estado.contagem = ultimaContagem();
+    } else if (eraUltima) {
+      estado.contagem = ultimaContagem();
+    }
     $('#link-planilha').href = r.planilhaUrl;
     $('#status-sync').textContent = (r.ultimaSync ? 'Última sincronização: ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
       (r.importando ? ' · importação em andamento…' : '') + ' · ' + r.chamados.length + ' chamados';
@@ -348,7 +439,11 @@
   }
 
   // ---------- Eventos ----------
-  document.querySelectorAll('#periodos button').forEach(b => b.onclick = () => { estado.periodo = b.dataset.p; render(); });
+  document.querySelectorAll('#periodos button').forEach(b => b.onclick = () => {
+    if (b.dataset.p === 'contagem' && estado.periodo !== 'contagem') estado.contagem = ultimaContagem();
+    estado.periodo = b.dataset.p; render();
+  });
+  $('#btn-encerrar').onclick = abrirEncerrar;
   $('#ant').onclick = () => mover(-1);
   $('#prox').onclick = () => mover(1);
   $('#dt-ini').onchange = $('#dt-fim').onchange = render;
