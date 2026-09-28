@@ -7,94 +7,110 @@
   <?!= include('Styles'); ?>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Painel de Chamados</h1>
-      <div class="sub" id="status-sync">Carregando…</div>
+  <nav class="nav">
+    <div class="marca"><img src="<?!= include('Logo'); ?>" alt="Grupo Agros"><span>Suporte</span></div>
+    <div class="links">
+      <a href="#visao-geral" class="on">Visão geral</a>
+      <a href="#sec-chamados">Chamados</a>
+      <a href="#sec-avaliacoes">Avaliações</a>
+      <a href="#sec-clientes">Clientes</a>
     </div>
-    <div class="acoes">
-      <a id="link-planilha" target="_blank" class="btn btn-sec">Planilha</a>
-      <button id="btn-encerrar" class="btn btn-sec">Encerrar contagem</button>
-      <button id="btn-sync" class="btn">Sincronizar agora</button>
+    <div class="dir">
+      <span id="status-sync">Carregando…</span>
+      <button id="btn-sync">Sincronizar</button>
+      <a id="link-planilha" target="_blank">Planilha</a>
     </div>
-  </header>
+  </nav>
 
-  <section class="filtros">
-    <div class="grupo" id="periodos">
-      <button data-p="contagem">Contagem</button>
-      <button data-p="dia">Dia</button>
-      <button data-p="semana">Semana</button>
-      <button data-p="mes" class="ativo">Mês</button>
-      <button data-p="ano">Ano</button>
-      <button data-p="tudo">Tudo</button>
-      <button data-p="custom">Personalizado</button>
-    </div>
-    <div class="grupo nav" id="nav-periodo">
-      <button id="ant" title="Período anterior">‹</button>
-      <span id="rotulo-periodo"></span>
-      <button id="prox" title="Próximo período">›</button>
-    </div>
-    <div class="grupo" id="custom" hidden>
-      <input type="date" id="dt-ini"> até <input type="date" id="dt-fim">
-    </div>
-    <label>Data de
-      <select id="campo-data">
-        <option value="da">Abertura</option>
-        <option value="dr">Resolução</option>
-        <option value="dv">Avaliação</option>
-      </select>
-    </label>
-    <label>Operador
-      <select id="f-operador"><option value="">Todos</option></select>
-    </label>
-    <label>Cliente
-      <input list="lista-clientes" id="f-cliente" placeholder="Todos">
-      <datalist id="lista-clientes"></datalist>
-    </label>
-    <label>Busca
-      <input id="f-busca" placeholder="nº, assunto, solicitante…">
-    </label>
-  </section>
-
-  <section class="kpis" id="kpis"></section>
-
-  <section class="graficos">
-    <div class="card largo"><h2>Chamados no período</h2><div class="cv"><canvas id="g-evolucao"></canvas></div></div>
-    <div class="card"><h2>Clientes que mais abriram chamados</h2><div class="cv alto"><canvas id="g-clientes"></canvas></div></div>
-    <div class="card"><h2>Solicitantes que mais entraram em contato</h2><div class="cv alto"><canvas id="g-solicitantes"></canvas></div></div>
-    <div class="card">
-      <div class="titulo-tabela"><h2>Classificação das demandas (assunto)</h2>
-        <select id="nivel-classif" title="Nível da classificação">
-          <option value="1">Sistema</option>
-          <option value="2" selected>Módulo</option>
-          <option value="3">Rotina</option>
-          <option value="99">Completo</option>
-        </select>
+  <main class="corpo">
+    <div class="topo" id="visao-geral">
+      <div>
+        <div class="pre" id="pre-periodo"></div>
+        <h1 id="rotulo-periodo"></h1>
       </div>
-      <div class="cv alto"><canvas id="g-classif"></canvas></div>
+      <div class="btns">
+        <span class="btns" id="nav-periodo">
+          <button class="b" id="ant">‹</button>
+          <button class="b" id="prox">›</button>
+        </span>
+        <button class="b p" id="btn-encerrar">Encerrar contagem</button>
+      </div>
     </div>
-    <div class="card"><h2>Distribuição das notas</h2><div class="cv alto"><canvas id="g-notas"></canvas></div></div>
-  </section>
 
-  <section class="card">
-    <div class="titulo-tabela">
-      <h2>Ranking de clientes</h2>
+    <section class="filtros">
+      <div class="seg" id="periodos">
+        <button data-p="contagem">Contagem</button>
+        <button data-p="dia">Dia</button>
+        <button data-p="semana">Semana</button>
+        <button data-p="mes" class="ativo">Mês</button>
+        <button data-p="ano">Ano</button>
+        <button data-p="tudo">Tudo</button>
+        <button data-p="custom">Personalizado</button>
+      </div>
+      <div id="custom" hidden>
+        <input type="date" id="dt-ini"> até <input type="date" id="dt-fim">
+      </div>
+      <label>Data de
+        <select id="campo-data">
+          <option value="da">Abertura</option>
+          <option value="dr">Resolução</option>
+          <option value="dv">Avaliação</option>
+        </select>
+      </label>
+      <label>Operador
+        <select id="f-operador"><option value="">Todos</option></select>
+      </label>
+      <label>Cliente
+        <input list="lista-clientes" id="f-cliente" placeholder="Todos">
+        <datalist id="lista-clientes"></datalist>
+      </label>
+      <label>Busca
+        <input id="f-busca" placeholder="nº, assunto, solicitante…">
+      </label>
+    </section>
+
+    <section class="kpis" id="kpis"></section>
+
+    <div class="grade2">
+      <div class="card"><div class="cab"><h2>Chamados no período</h2><span class="sub">resolvidos / em aberto / cancelados</span></div>
+        <div class="cc"><div class="cv"><canvas id="g-evolucao"></canvas></div></div></div>
+      <div class="card"><div class="cab"><h2>Clientes com mais chamados</h2></div><div class="cc rank" id="r-clientes"></div></div>
     </div>
-    <div class="tabela-wrap"><table id="t-clientes"></table></div>
-  </section>
 
-  <section class="card">
-    <div class="titulo-tabela">
-      <h2>Chamados <span id="qtd-chamados" class="sub"></span></h2>
-      <button class="btn btn-sec" id="btn-csv">Exportar CSV</button>
+    <div class="grade3">
+      <div class="card"><div class="cab"><h2>Solicitantes que mais contataram</h2></div><div class="cc rank" id="r-solicitantes"></div></div>
+      <div class="card">
+        <div class="cab"><h2>Classificação das demandas</h2>
+          <select id="nivel-classif" title="Nível da classificação">
+            <option value="1">Sistema</option>
+            <option value="2" selected>Módulo</option>
+            <option value="3">Rotina</option>
+            <option value="99">Completo</option>
+          </select>
+        </div>
+        <div class="cc rank" id="r-classif"></div>
+      </div>
+      <div class="card"><div class="cab"><h2>Distribuição das notas</h2></div><div class="cc"><div class="cv"><canvas id="g-notas"></canvas></div></div></div>
     </div>
-    <div class="tabela-wrap"><table id="t-chamados"></table></div>
-  </section>
 
-  <section class="card">
-    <h2>Comentários das avaliações</h2>
-    <div id="comentarios"></div>
-  </section>
+    <section class="card" id="sec-chamados">
+      <div class="cab">
+        <h2>Chamados <span id="qtd-chamados" class="sub"></span></h2>
+        <button class="b" id="btn-csv">Exportar CSV</button>
+      </div>
+      <div class="tabela-wrap"><table id="t-chamados"></table></div>
+    </section>
+
+    <section class="card" id="sec-avaliacoes">
+      <div class="cab"><h2>Comentários das avaliações</h2></div>
+      <div class="cc" id="comentarios"></div>
+    </section>
+
+    <section class="card" id="sec-clientes">
+      <div class="cab"><h2>Ranking de clientes</h2></div>
+      <div class="tabela-wrap"><table id="t-clientes"></table></div>
+    </section>
+  </main>
 
   <div id="modal" class="modal" hidden>
     <div class="modal-caixa">

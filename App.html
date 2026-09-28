@@ -13,12 +13,14 @@
   const fmtDataHora = ms => ms ? new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
   const media = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
   const fmtMedia = v => v == null ? '–' : v.toFixed(1).replace('.', ',');
-  const classeNota = n => n == null ? '' : n >= 9 ? 'b' : n >= 7 ? 'm' : 'r';
+  const classeNota = n => n == null ? '' : n >= 9 ? 'boa' : n >= 7 ? 'media' : 'baixa';
   const resolvido = c => c.st === 'Resolvido';
   const cancelado = c => /cancelad/i.test(c.st);
   const emAberto = c => !resolvido(c) && !cancelado(c);
   const classeStatus = st => st === 'Resolvido' ? 'Resolvido' : /cancelad/i.test(st) ? 'Cancelado' : 'Aberto';
   const nivelAssunto = (as, n) => as ? as.split(' - ').slice(0, n).join(' - ') : '(sem assunto)';
+  const ESCURO = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  const COR = { verde: ESCURO ? '#4f9a5a' : '#1f4d2b', ouro: '#f0c21e', cinza: '#b3bac5', folha: '#8fb04a' };
   const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
   // Backend: Apps Script ou dados de exemplo quando aberto fora do Google
@@ -31,12 +33,24 @@
   }
 
   // ---------- Período ----------
-  function intervalo() {
-    const r = new Date(estado.ref); r.setHours(0, 0, 0, 0);
+  function deslocar(ref, delta) {
+    const r = new Date(ref);
+    if (estado.periodo === 'dia') r.setDate(r.getDate() + delta);
+    if (estado.periodo === 'semana') r.setDate(r.getDate() + 7 * delta);
+    if (estado.periodo === 'mes') r.setMonth(r.getMonth() + delta, 1);
+    if (estado.periodo === 'ano') r.setFullYear(r.getFullYear() + delta);
+    return r;
+  }
+
+  // desloc = -1 devolve o período anterior (ou null quando não existe)
+  function intervalo(desloc = 0) {
+    const r = deslocar(estado.ref, desloc); r.setHours(0, 0, 0, 0);
+    if (desloc && ['tudo', 'custom'].includes(estado.periodo)) return null;
     let ini, fim;
     switch (estado.periodo) {
       case 'contagem': {
-        const k = estado.contagens, i = estado.contagem;
+        const k = estado.contagens, i = estado.contagem + desloc;
+        if (i < 0 || k[i] == null) return desloc ? null : { ini: null, fim: null };
         ini = k[i] != null ? new Date(k[i]) : null;
         fim = k[i + 1] != null ? new Date(k[i + 1]) : null;
         break;
@@ -60,21 +74,36 @@
     return { ini, fim };
   }
 
+  const maiuscula = t => t.charAt(0).toUpperCase() + t.slice(1);
+
+  // Cabeçalho do período: linha pequena (pre), título e dica com horários
   function rotuloPeriodo({ ini, fim }) {
     const r = estado.ref;
     switch (estado.periodo) {
       case 'contagem': {
-        if (!ini) return 'Contagem atual (início ainda não registrado)';
+        if (!ini) return { pre: 'Contagem', titulo: 'Início ainda não registrado' };
         const n = estado.contagem + 1;
-        return fim ? 'Contagem ' + n + ': ' + fmtDataHora(ini) + ' – ' + fmtDataHora(fim)
-                   : 'Contagem ' + n + ' (atual): desde ' + fmtDataHora(ini);
+        return { pre: 'Contagem ' + n + (fim ? ' · encerrada' : ' · em andamento'),
+                 titulo: fmtData(ini) + ' – ' + (fim ? fmtData(fim) : 'hoje'),
+                 dica: fmtDataHora(ini) + ' – ' + (fim ? fmtDataHora(fim) : 'agora') };
       }
-      case 'dia': return r.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-      case 'semana': { const f = new Date(fim); f.setDate(f.getDate() - 1); return fmtData(ini) + ' – ' + fmtData(f); }
-      case 'mes': return r.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-      case 'ano': return String(r.getFullYear());
-      default: return '';
+      case 'dia': return { pre: 'Dia', titulo: maiuscula(r.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })) };
+      case 'semana': { const f = new Date(fim); f.setDate(f.getDate() - 1); return { pre: 'Semana', titulo: fmtData(ini) + ' – ' + fmtData(f) }; }
+      case 'mes': return { pre: 'Mês', titulo: maiuscula(r.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })) };
+      case 'ano': return { pre: 'Ano', titulo: String(r.getFullYear()) };
+      case 'custom': {
+        if (!ini && !fim) return { pre: 'Período personalizado', titulo: 'Escolha as datas' };
+        const f = fim ? new Date(fim.getTime() - 864e5) : null;
+        return { pre: 'Período personalizado', titulo: (ini ? fmtData(ini) : 'início') + ' – ' + (f ? fmtData(f) : 'hoje') };
+      }
+      default: return { pre: 'Período', titulo: 'Todo o histórico' };
     }
+  }
+
+  // Nome do período anterior, usado na comparação dos números
+  function nomeAnterior() {
+    return { contagem: 'contagem ' + estado.contagem, dia: 'dia anterior', semana: 'semana anterior',
+             mes: 'mês anterior', ano: 'ano anterior' }[estado.periodo];
   }
 
   function mover(delta) {
@@ -82,12 +111,7 @@
       estado.contagem = Math.max(0, Math.min(ultimaContagem(), estado.contagem + delta));
       return render();
     }
-    const r = new Date(estado.ref);
-    if (estado.periodo === 'dia') r.setDate(r.getDate() + delta);
-    if (estado.periodo === 'semana') r.setDate(r.getDate() + 7 * delta);
-    if (estado.periodo === 'mes') r.setMonth(r.getMonth() + delta, 1);
-    if (estado.periodo === 'ano') r.setFullYear(r.getFullYear() + delta);
-    estado.ref = r; render();
+    estado.ref = deslocar(estado.ref, delta); render();
   }
 
   // Índice da contagem atual (em aberto)
@@ -100,8 +124,8 @@
     return c.da || c.dr || c.dv;
   }
 
-  function filtrar() {
-    const { ini, fim } = intervalo();
+  function filtrar(iv = intervalo()) {
+    const { ini, fim } = iv;
     const cli = estado.cliente.trim().toLowerCase();
     const q = estado.busca.trim().toLowerCase();
     return estado.dados.filter(c => {
@@ -119,23 +143,32 @@
   // ---------- Render ----------
   function render() {
     const iv = intervalo();
-    $('#rotulo-periodo').textContent = rotuloPeriodo(iv);
-    $('#nav-periodo').style.display = ['tudo', 'custom'].includes(estado.periodo) ? 'none' : '';
+    const rot = rotuloPeriodo(iv);
+    $('#pre-periodo').textContent = rot.pre;
+    $('#rotulo-periodo').textContent = rot.titulo;
+    $('#rotulo-periodo').title = rot.dica || '';
+    $('#nav-periodo').hidden = ['tudo', 'custom'].includes(estado.periodo);
     $('#custom').hidden = estado.periodo !== 'custom';
     document.querySelectorAll('#periodos button').forEach(b => b.classList.toggle('ativo', b.dataset.p === estado.periodo));
     if (estado.periodo === 'contagem') {
-      $('#ant').disabled = estado.contagem <= 0;
-      $('#prox').disabled = estado.contagem >= ultimaContagem();
+      const n = estado.contagem + 1;
+      $('#ant').hidden = estado.contagem <= 0;
+      $('#prox').hidden = estado.contagem >= ultimaContagem();
+      $('#ant').textContent = '‹ Contagem ' + (n - 1);
+      $('#prox').textContent = 'Contagem ' + (n + 1) + ' ›';
     } else {
-      $('#ant').disabled = $('#prox').disabled = false;
+      $('#ant').hidden = $('#prox').hidden = false;
+      $('#ant').textContent = '‹ Anterior';
+      $('#prox').textContent = 'Próximo ›';
     }
 
-    const lista = filtrar();
-    renderKpis(lista);
+    const lista = filtrar(iv);
+    const ivAnt = intervalo(-1);
+    renderKpis(lista, ivAnt ? filtrar(ivAnt) : null);
     renderEvolucao(lista, iv);
-    renderRanking('g-clientes', contar(lista, c => c.cl || '(sem cliente)'), '#1f6feb');
-    renderRanking('g-solicitantes', contar(lista, c => c.so ? c.so + (c.cl ? ' · ' + c.cl : '') : '(sem solicitante)'), '#8250df');
-    renderRanking('g-classif', contar(lista, c => nivelAssunto(c.as, estado.nivel)), '#1a7f37');
+    renderBarras('r-clientes', contar(lista, c => c.cl || '(sem cliente)'), 10);
+    renderBarras('r-solicitantes', contar(lista, c => c.so ? c.so + (c.cl ? ' · ' + c.cl : '') : '(sem solicitante)'));
+    renderBarras('r-classif', contar(lista, c => nivelAssunto(c.as, estado.nivel)));
     renderNotas(lista);
     renderTabelaClientes(lista);
     renderTabelaChamados(lista);
@@ -148,28 +181,49 @@
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   }
 
-  function renderKpis(lista) {
-    const resolvidos = lista.filter(resolvido).length;
-    const comRc = lista.filter(c => c.rc);
-    const rcOk = comRc.filter(c => /^resolvido/i.test(c.rc)).length;
+  function metricas(lista) {
     const avaliados = lista.filter(c => c.na != null || c.ns != null);
-    const na = media(avaliados.map(c => c.na).filter(v => v != null));
-    const ns = media(avaliados.map(c => c.ns).filter(v => v != null));
-    const clientes = new Set(lista.map(c => c.cl).filter(Boolean)).size;
-    const taxa = resolvidos ? Math.round(100 * avaliados.length / resolvidos) + '% dos resolvidos' : '';
+    const comRc = lista.filter(c => c.rc);
+    return {
+      total: lista.length,
+      resolvidos: lista.filter(resolvido).length,
+      abertos: lista.filter(emAberto).length,
+      cancelados: lista.filter(cancelado).length,
+      avaliacoes: avaliados.length,
+      na: media(avaliados.map(c => c.na).filter(v => v != null)),
+      ns: media(avaliados.map(c => c.ns).filter(v => v != null)),
+      rcN: comRc.length,
+      rcOk: comRc.filter(c => /^resolvido/i.test(c.rc)).length,
+      clientes: new Set(lista.map(c => c.cl).filter(Boolean)).size
+    };
+  }
+
+  function renderKpis(lista, listaAnt) {
+    const m = metricas(lista), a = listaAnt ? metricas(listaAnt) : null, nome = nomeAnterior();
+    // Variação percentual (contagens) e absoluta (notas) em relação ao período anterior
+    const vPct = (campo, colorir) => {
+      if (!a || !a[campo]) return '';
+      const p = Math.round(100 * (m[campo] - a[campo]) / a[campo]);
+      const cls = !colorir || !p ? '' : p > 0 ? 'up' : 'dn';
+      return `<div class="d"><span class="${cls}">${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p)}%</span> vs. ${nome}</div>`;
+    };
+    const vNota = campo => {
+      if (!a || m[campo] == null || a[campo] == null) return '';
+      const d = Math.round(10 * (m[campo] - a[campo])) / 10;
+      const cls = d > 0 ? 'up' : d < 0 ? 'dn' : '';
+      return `<div class="d"><span class="${cls}">${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toFixed(1).replace('.', ',')}</span> vs. ${nome} (${fmtMedia(a[campo])})</div>`;
+    };
+    const taxa = m.resolvidos ? Math.round(100 * m.avaliacoes / m.resolvidos) + '% dos resolvidos' : 'nenhum resolvido';
+    const rc = m.rcN ? `Resolvido p/ cliente: ${Math.round(100 * m.rcOk / m.rcN)}% (${m.rcOk} de ${m.rcN})` : 'média de 1 a 10';
     const k = [
-      ['Chamados', lista.length, ''],
-      ['Resolvidos', resolvidos, ''],
-      ['Em aberto', lista.filter(emAberto).length, ''],
-      ['Cancelados', lista.filter(cancelado).length, ''],
-      ['Avaliações', avaliados.length, taxa],
-      ['Nota atendimento', fmtMedia(na), 'média (1 a 10)'],
-      ['Nota sistema ERP', fmtMedia(ns), 'média (1 a 10)'],
-      ['Resolvido p/ cliente', comRc.length ? Math.round(100 * rcOk / comRc.length) + '%' : '–', comRc.length ? rcOk + ' de ' + comRc.length + ' avaliações' : ''],
-      ['Clientes atendidos', clientes, '']
+      ['', 'Chamados', m.total, vPct('total', false) +
+        `<div class="d">${m.resolvidos} resolvidos · ${m.abertos} em aberto · ${m.cancelados} cancelados</div><div class="d">${m.clientes} clientes atendidos</div>`],
+      ['', 'Avaliações', m.avaliacoes, vPct('avaliacoes', true) + `<div class="d">${taxa}</div>`],
+      ['destaque', 'Nota atendimento', fmtMedia(m.na), vNota('na') + `<div class="d">${rc}</div>`],
+      ['', 'Nota sistema ERP', fmtMedia(m.ns), vNota('ns') + '<div class="d">média de 1 a 10</div>']
     ];
-    $('#kpis').innerHTML = k.map(([l, v, s]) =>
-      `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${s}</div></div>`).join('');
+    $('#kpis').innerHTML = k.map(([cls, l, v, d]) =>
+      `<div class="card kpi ${cls}"><div class="pre">${l}</div><div class="v">${v}</div>${d}</div>`).join('');
   }
 
   function grafico(id, config) {
@@ -222,24 +276,20 @@
     grafico('g-evolucao', {
       type: 'bar',
       data: { labels: rotulos, datasets: [
-        { label: 'Resolvidos', data: res, backgroundColor: '#1f6feb', borderRadius: 3, stack: 's' },
-        { label: 'Em aberto', data: abe, backgroundColor: '#f0a33a', borderRadius: 3, stack: 's' },
-        { label: 'Cancelados', data: can, backgroundColor: '#9aa3b2', borderRadius: 3, stack: 's' }
+        { label: 'Resolvidos', data: res, backgroundColor: COR.verde, borderRadius: 2, stack: 's' },
+        { label: 'Em aberto', data: abe, backgroundColor: COR.ouro, borderRadius: 2, stack: 's' },
+        { label: 'Cancelados', data: can, backgroundColor: COR.cinza, borderRadius: 2, stack: 's' }
       ] },
       options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
                  scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } }
     });
   }
 
-  function renderRanking(id, pares, cor) {
-    const top = pares.slice(0, 10);
-    grafico(id, {
-      type: 'bar',
-      data: { labels: top.map(p => p[0].length > 38 ? p[0].slice(0, 36) + '…' : p[0]),
-              datasets: [{ data: top.map(p => p[1]), backgroundColor: cor, borderRadius: 3 }] },
-      options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } },
-                 scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { grid: { display: false } } } }
-    });
+  function renderBarras(id, pares, n = 8) {
+    const top = pares.slice(0, n), max = top.length ? top[0][1] : 1;
+    $('#' + id).innerHTML = top.length ? top.map(([k, v]) =>
+      `<div class="lin"><span title="${esc(k)}">${esc(k)}</span><b>${v}</b></div><div class="barra"><i style="width:${100 * v / max}%"></i></div>`).join('')
+      : '<div class="vazio">Nenhum chamado no período</div>';
   }
 
   function renderNotas(lista) {
@@ -248,8 +298,8 @@
     grafico('g-notas', {
       type: 'bar',
       data: { labels: faixa.map(String), datasets: [
-        { label: 'Atendimento', data: cont('na'), backgroundColor: '#1f6feb', borderRadius: 3 },
-        { label: 'Sistema ERP', data: cont('ns'), backgroundColor: '#8250df', borderRadius: 3 }
+        { label: 'Atendimento', data: cont('na'), backgroundColor: COR.verde, borderRadius: 2 },
+        { label: 'Sistema ERP', data: cont('ns'), backgroundColor: COR.folha, borderRadius: 2 }
       ] },
       options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
                  scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false }, title: { display: true, text: 'Nota' } } } }
@@ -327,7 +377,7 @@
           ${campo('Nota atendimento', d.notaAtendimento)}${campo('Nota sistema', d.notaSistema)}${campo('Resolvido p/ cliente', d.resolucaoCliente)}
         </div>
         ${d.comentario ? `<div class="coment">${esc(d.comentario)}</div>` : ''}
-        <div class="abas grupo">${abas.map((a, i) => `<button data-aba="${a.id}" class="${i ? '' : 'ativo'}">${a.rotulo}</button>`).join('')}</div>
+        <div class="abas seg">${abas.map((a, i) => `<button data-aba="${a.id}" class="${i ? '' : 'ativo'}">${a.rotulo}</button>`).join('')}</div>
         <div data-painel="resumo" ${d.emails.length ? 'hidden' : ''}><pre class="resumo">${esc(d.resumo) || 'Sem resumo.'}</pre></div>
         ${d.emails.map((e, i) => `<div data-painel="e${i}" ${i ? 'hidden' : ''}>
           ${e.erro ? `<p>${esc(e.erro)}</p>` : `
@@ -385,8 +435,8 @@
       <p>A contagem atual será encerrada <b>agora (${fmtDataHora(agora)})</b> e uma nova contagem começa no mesmo instante.
         Chamados e avaliações a partir de agora entram na nova contagem.</p>
       <p class="sub">Se encerrar por engano, corrija a aba "Contagens" da planilha.</p>
-      <div class="acoes"><button class="btn" id="enc-confirmar">Encerrar e iniciar nova contagem</button>
-        <button class="btn btn-sec" id="enc-cancelar">Cancelar</button></div>`;
+      <div class="acoes"><button class="b p" id="enc-confirmar">Encerrar e iniciar nova contagem</button>
+        <button class="b" id="enc-cancelar">Cancelar</button></div>`;
     $('#enc-cancelar').onclick = () => $('#modal').hidden = true;
     $('#enc-confirmar').onclick = async () => {
       let inicio = null;
@@ -424,8 +474,9 @@
       estado.contagem = ultimaContagem();
     }
     $('#link-planilha').href = r.planilhaUrl;
-    $('#status-sync').textContent = (r.ultimaSync ? 'Última sincronização: ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
-      (r.importando ? ' · importação em andamento…' : '') + ' · ' + r.chamados.length + ' chamados';
+    $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
+      (r.importando ? ' · importação em andamento…' : '');
+    $('#status-sync').title = r.chamados.length + ' chamados na base';
     const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const ops = contar(estado.dados.filter(c => c.op), c => c.op);
     const meu = contar(estado.dados.filter(c => c.eu && c.op), c => c.op)[0];
@@ -444,6 +495,8 @@
     estado.periodo = b.dataset.p; render();
   });
   $('#btn-encerrar').onclick = abrirEncerrar;
+  document.querySelectorAll('.nav .links a').forEach(a => a.addEventListener('click', () =>
+    document.querySelectorAll('.nav .links a').forEach(x => x.classList.toggle('on', x === a))));
   $('#ant').onclick = () => mover(-1);
   $('#prox').onclick = () => mover(1);
   $('#dt-ini').onchange = $('#dt-fim').onchange = render;
@@ -469,9 +522,9 @@
   $('#btn-sync').onclick = async () => {
     const b = $('#btn-sync');
     b.disabled = true; b.textContent = 'Sincronizando…';
-    try { const msg = await chamar('sincronizarAgora'); await carregar(); $('#status-sync').textContent += ' · ' + msg; }
+    try { const msg = await chamar('sincronizarAgora'); await carregar(); $('#status-sync').title = msg; }
     catch (e) { alert('Erro ao sincronizar: ' + (e.message || e)); }
-    finally { b.disabled = false; b.textContent = 'Sincronizar agora'; }
+    finally { b.disabled = false; b.textContent = 'Sincronizar'; }
   };
 
   carregar().catch(e => { $('#status-sync').textContent = 'Erro ao carregar: ' + (e.message || e); });
