@@ -19,8 +19,18 @@
   const emAberto = c => !resolvido(c) && !cancelado(c);
   const classeStatus = st => st === 'Resolvido' ? 'Resolvido' : /cancelad/i.test(st) ? 'Cancelado' : 'Aberto';
   const nivelAssunto = (as, n) => as ? as.split(' - ').slice(0, n).join(' - ') : '(sem assunto)';
-  const ESCURO = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
-  const COR = { verde: ESCURO ? '#4f9a5a' : '#1f4d2b', ouro: '#f0c21e', cinza: '#b3bac5', folha: '#8fb04a' };
+  // ---------- Tema (claro/escuro) ----------
+  const raiz = document.documentElement;
+  const temaSistemaEscuro = () => !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  const temaEscuro = () => raiz.dataset.theme ? raiz.dataset.theme === 'dark' : temaSistemaEscuro();
+  const COR = { ouro: '#f0c21e', cinza: '#b3bac5', folha: '#8fb04a' };
+  function aplicarTema(tema) {
+    if (tema) raiz.dataset.theme = tema; else delete raiz.dataset.theme;
+    COR.verde = temaEscuro() ? '#4f9a5a' : '#1f4d2b';
+    $('#btn-tema').textContent = temaEscuro() ? 'Tema claro' : 'Tema escuro';
+  }
+  let temaSalvo = null; try { temaSalvo = localStorage.getItem('painel.tema'); } catch (e) { /* sem storage */ }
+  aplicarTema(temaSalvo);
   const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
   // Backend: Apps Script ou dados de exemplo quando aberto fora do Google
@@ -495,8 +505,20 @@
     estado.periodo = b.dataset.p; render();
   });
   $('#btn-encerrar').onclick = abrirEncerrar;
-  document.querySelectorAll('.nav .links a').forEach(a => a.addEventListener('click', () =>
-    document.querySelectorAll('.nav .links a').forEach(x => x.classList.toggle('on', x === a))));
+  // Links da barra: rolagem via JS (links com # recarregam a página dentro do Apps Script)
+  document.querySelectorAll('.nav .links a').forEach(a => a.onclick = e => {
+    e.preventDefault();
+    document.querySelectorAll('.nav .links a').forEach(x => x.classList.toggle('on', x === a));
+    const alvo = document.getElementById(a.dataset.alvo);
+    const y = a.dataset.alvo === 'visao-geral' ? 0 : alvo.getBoundingClientRect().top + window.scrollY - $('.nav').offsetHeight - 12;
+    window.scrollTo(0, y);
+  });
+  $('#btn-tema').onclick = () => {
+    const novo = temaEscuro() ? 'light' : 'dark';
+    try { localStorage.setItem('painel.tema', novo); } catch (e) { /* sem storage */ }
+    aplicarTema(novo);
+    render();
+  };
   $('#ant').onclick = () => mover(-1);
   $('#prox').onclick = () => mover(1);
   $('#dt-ini').onchange = $('#dt-fim').onchange = render;
