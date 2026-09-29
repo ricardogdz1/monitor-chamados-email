@@ -4,8 +4,7 @@
  * Depois de alterar, rode reprocessarTudo().
  */
 const CONFIG = {
-  // Pasta do Google Drive onde a planilha de dados é criada
-  PASTA_DRIVE_ID: '14i97cnr5rTbys2vsH4ofdSLLDvmC3RIT',
+  // Planilha de dados criada no Drive de cada colaborador
   NOME_PLANILHA: 'Painel de Chamados - Dados',
 
   // Busca do Gmail que encontra os emails do DeskManager

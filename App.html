@@ -5,7 +5,7 @@
   // ---------- Estado ----------
   const estado = {
     dados: [], contagens: [], contagem: 0, periodo: 'mes', ref: new Date(), campo: 'da',
-    cliente: '', operador: '', busca: '', nivel: 2, ordem: { col: 'data', dir: -1 }, graficos: {}
+    cliente: '', busca: '', nivel: 2, ordem: { col: 'data', dir: -1 }, graficos: {}
   };
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -149,7 +149,6 @@
       if (ini && d < ini.getTime()) return false;
       if (fim && d >= fim.getTime()) return false;
       if (cli && c.cl.toLowerCase() !== cli) return false;
-      if (estado.operador && c.op !== estado.operador) return false;
       if (q && ![c.n, c.as, c.so, c.cl, c.op, c.gr, c.co].join(' ').toLowerCase().includes(q)) return false;
       return true;
     });
@@ -433,7 +432,7 @@
     if (!primeira) {
       const doCiclo = campo => estado.dados.filter(c => c[campo] && c[campo] >= atual);
       const av = doCiclo('dv').filter(c => c.na != null || c.ns != null);
-      resumo = `<p>Contagem atual: desde <b>${fmtDataHora(atual)}</b> (todos os operadores)</p>
+      resumo = `<p>Contagem atual: desde <b>${fmtDataHora(atual)}</b></p>
         <div class="det-grid">
           <div><b>Chamados abertos</b>${doCiclo('da').length}</div>
           <div><b>Chamados resolvidos</b>${doCiclo('dr').filter(resolvido).length}</div>
@@ -476,9 +475,35 @@
     };
   }
 
+  // ---------- Operador (quem é o usuário no DeskManager) ----------
+  function abrirOperador(r) {
+    const ops = r.operadores || [];
+    $('#modal').hidden = false;
+    $('#modal-conteudo').innerHTML = `
+      <h2 style="font-size:18px">Seu nome de operador</h2>
+      <p>O painel mostra apenas os chamados atendidos por você. Confirme o seu nome como operador no DeskManager:</p>
+      ${ops.length ? `<p><select id="op-nome">${ops.map(o => `<option value="${esc(o)}"${o === r.operador ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></p>`
+        : '<p class="sub">Nenhum operador encontrado nos seus emails ainda. Sincronize e tente novamente.</p>'}
+      <div class="acoes">${ops.length ? '<button class="b p" id="op-confirmar">Confirmar</button>' : ''}
+        <button class="b" id="op-cancelar">Fechar</button></div>`;
+    $('#op-cancelar').onclick = () => $('#modal').hidden = true;
+    if (!ops.length) return;
+    $('#op-confirmar').onclick = async () => {
+      const b = $('#op-confirmar');
+      b.disabled = true; b.textContent = 'Salvando…';
+      try {
+        aplicar(await chamar('definirOperador', $('#op-nome').value));
+        $('#modal').hidden = true;
+      } catch (e) {
+        alert('Erro ao salvar: ' + (e.message || e));
+        b.disabled = false; b.textContent = 'Confirmar';
+      }
+    };
+  }
+
   // ---------- Carga ----------
-  async function carregar() {
-    const r = await chamar('getDados');
+  function aplicar(r) {
+    estado.resposta = r;
     estado.dados = r.chamados;
     const eraUltima = estado.contagem >= ultimaContagem();
     estado.contagens = r.contagens || [];
@@ -488,20 +513,28 @@
     } else if (eraUltima) {
       estado.contagem = ultimaContagem();
     }
+    estado.carregado = true;
     $('#link-planilha').href = r.planilhaUrl;
     $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
       (r.importando ? ' · importação em andamento…' : '');
-    $('#status-sync').title = r.chamados.length + ' chamados na base';
+    $('#status-sync').title = r.chamados.length + ' chamados seus na base';
+    $('#btn-operador').textContent = r.operador || 'Definir operador';
     const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    const ops = contar(estado.dados.filter(c => c.op), c => c.op);
-    const meu = contar(estado.dados.filter(c => c.eu && c.op), c => c.op)[0];
-    let salvo = null; try { salvo = localStorage.getItem('painel.operador'); } catch (e) { /* sem storage */ }
-    if (!estado.carregado) estado.operador = salvo != null ? salvo : (meu ? meu[0] : '');
-    estado.carregado = true;
-    $('#f-operador').innerHTML = '<option value="">Todos</option>' + ops.map(([o, n]) => `<option value="${esc(o)}">${esc(o)} (${n})</option>`).join('');
-    $('#f-operador').value = estado.operador;
     $('#lista-clientes').innerHTML = clientes.map(c => `<option value="${esc(c)}">`).join('');
     render();
+  }
+
+  async function carregar() {
+    let r = await chamar('getDados');
+    // Primeiro acesso: importa os emails do próprio Gmail antes de mostrar (em partes, se forem muitos)
+    for (let i = 0; i < 5 && (!r.ultimaSync || r.importando); i++) {
+      aplicar(r);
+      $('#status-sync').textContent = 'Importando seus emails…';
+      await chamar('sincronizarAgora');
+      r = await chamar('getDados');
+    }
+    aplicar(r);
+    if (!r.operadorConfirmado) abrirOperador(r);
   }
 
   // ---------- Eventos ----------
@@ -532,7 +565,7 @@
   };
   $('#campo-data').onchange = e => { estado.campo = e.target.value; render(); };
   $('#f-cliente').oninput = e => { estado.cliente = e.target.value; render(); };
-  $('#f-operador').onchange = e => { estado.operador = e.target.value; try { localStorage.setItem('painel.operador', estado.operador); } catch (x) { /* sem storage */ } render(); };
+  $('#btn-operador').onclick = () => estado.resposta && abrirOperador(estado.resposta);
   $('#nivel-classif').onchange = e => { estado.nivel = Number(e.target.value); render(); };
   $('#f-busca').oninput = e => { estado.busca = e.target.value; render(); };
   $('#t-chamados').onclick = e => {

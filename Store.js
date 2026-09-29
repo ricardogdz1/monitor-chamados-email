@@ -1,5 +1,8 @@
 /**
- * Armazenamento em Google Planilhas (criada automaticamente na pasta do Drive).
+ * Armazenamento em Google Planilhas.
+ *
+ * Cada colaborador tem a sua planilha, criada no próprio Drive na primeira vez que abre o painel,
+ * e o seu estado (planilha, última sincronização, operador) fica nas propriedades do usuário.
  */
 
 const ABA_CHAMADOS = 'Chamados';
@@ -13,14 +16,40 @@ const COLUNAS = [
   'msgAbertura', 'msgResolucao', 'msgAvaliacao', 'msgUltima', 'resumo'
 ];
 
+const props_ = () => PropertiesService.getUserProperties();
+
+/**
+ * Antes o painel era de um usuário só, com o estado nas propriedades do script.
+ * O dono daquela planilha a herda (com a sincronização); os demais começam do zero.
+ */
+function migrarEstadoAntigo_(props) {
+  const antigas = PropertiesService.getScriptProperties();
+  const id = antigas.getProperty('PLANILHA_ID');
+  if (!id) return;
+  try {
+    const dono = DriveApp.getFileById(id).getOwner();
+    if (!dono || dono.getEmail() !== Session.getEffectiveUser().getEmail()) return;
+  } catch (e) {
+    return; // sem acesso à planilha antiga: não é deste usuário
+  }
+  // Copia sem apagar: a versão anterior publicada continua lendo as propriedades do script
+  ['PLANILHA_ID', 'ULTIMA_SYNC', 'OFFSET_BUSCA'].forEach(k => {
+    const v = antigas.getProperty(k);
+    if (v) props.setProperty(k, v);
+  });
+}
+
+let planilhaCache_ = null;
+
 function planilha_() {
-  const props = PropertiesService.getScriptProperties();
+  if (planilhaCache_) return planilhaCache_;
+  const props = props_();
+  if (!props.getProperty('PLANILHA_ID')) migrarEstadoAntigo_(props);
   const id = props.getProperty('PLANILHA_ID');
   if (id) {
-    try { return SpreadsheetApp.openById(id); } catch (e) { /* recria abaixo */ }
+    try { return (planilhaCache_ = SpreadsheetApp.openById(id)); } catch (e) { /* recria abaixo */ }
   }
   const ss = SpreadsheetApp.create(CONFIG.NOME_PLANILHA);
-  DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(CONFIG.PASTA_DRIVE_ID));
 
   const aba = ss.getSheets()[0].setName(ABA_CHAMADOS);
   aba.setFrozenRows(1);
@@ -28,7 +57,9 @@ function planilha_() {
   proc.getRange(1, 1, 1, 4).setValues([['msgId', 'numero', 'tipo', 'processadoEm']]).setFontWeight('bold');
 
   props.setProperty('PLANILHA_ID', ss.getId());
-  return ss;
+  props.deleteProperty('ULTIMA_SYNC');
+  props.deleteProperty('OFFSET_BUSCA');
+  return (planilhaCache_ = ss);
 }
 
 function lerChamados_() {

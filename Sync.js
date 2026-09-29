@@ -10,20 +10,24 @@
 
 function instalar() {
   planilha_();
-  ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'sincronizar')
-    .forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('sincronizar').timeBased().everyMinutes(CONFIG.INTERVALO_SYNC_MIN).create();
+  garantirGatilho_();
   sincronizar();
   Logger.log('Instalado. Planilha: ' + planilha_().getUrl());
 }
 
+/** Gatilho de sincronização do usuário atual (cada colaborador tem o seu, lendo o próprio Gmail). */
+function garantirGatilho_() {
+  const existe = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'sincronizar');
+  if (!existe) ScriptApp.newTrigger('sincronizar').timeBased().everyMinutes(CONFIG.INTERVALO_SYNC_MIN).create();
+}
+
 function sincronizar() {
-  const lock = LockService.getScriptLock();
+  const lock = LockService.getUserLock();
   if (!lock.tryLock(1000)) return 'Sincronização já em andamento.';
   try {
+    planilha_(); // garante a planilha (e a migração do estado antigo) antes de ler as propriedades
     const inicio = Date.now();
-    const props = PropertiesService.getScriptProperties();
+    const props = props_();
     const ultimaSync = Number(props.getProperty('ULTIMA_SYNC') || 0);
     let offset = Number(props.getProperty('OFFSET_BUSCA') || 0);
 
@@ -81,7 +85,7 @@ function reprocessarTudo() {
     const aba = ss.getSheetByName(nome);
     if (aba.getLastRow() > 1) aba.deleteRows(2, aba.getLastRow() - 1);
   });
-  const props = PropertiesService.getScriptProperties();
+  const props = props_();
   props.deleteProperty('ULTIMA_SYNC');
   props.deleteProperty('OFFSET_BUSCA');
   return sincronizar();

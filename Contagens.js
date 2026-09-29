@@ -35,7 +35,7 @@ function lerContagens_() {
  * Na primeira vez não existe contagem registrada: inicioMs informa quando a atual começou.
  */
 function encerrarContagem(inicioMs) {
-  const lock = LockService.getScriptLock();
+  const lock = LockService.getUserLock();
   lock.waitLock(10000);
   try {
     const aba = abaContagens_();
