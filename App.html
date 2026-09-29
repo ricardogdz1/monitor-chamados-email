@@ -516,7 +516,8 @@
     estado.carregado = true;
     $('#link-planilha').href = r.planilhaUrl;
     $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
-      (r.importando ? ' · importação em andamento…' : '');
+      (r.importando ? ' · importação em andamento…' : '') +
+      (r.pausaCota ? ' · limite diário do Gmail atingido, nova tentativa após ' + fmtDataHora(r.pausaCota) : '');
     $('#status-sync').title = r.chamados.length + ' chamados seus na base';
     $('#btn-operador').textContent = r.operador || 'Definir operador';
     const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -526,14 +527,18 @@
 
   async function carregar() {
     let r = await chamar('getDados');
-    // Primeiro acesso: importa os emails do próprio Gmail antes de mostrar (em partes, se forem muitos)
-    for (let i = 0; i < 5 && (!r.ultimaSync || r.importando); i++) {
-      aplicar(r);
-      $('#status-sync').textContent = 'Importando seus emails…';
-      await chamar('sincronizarAgora');
-      r = await chamar('getDados');
-    }
     aplicar(r);
+    // Primeiro acesso: importa os emails do próprio Gmail (em partes, se forem muitos; o gatilho continua depois).
+    // Só uma vez por abertura da página, para não gastar a cota diária do Gmail.
+    if (!estado.importouNaCarga && !r.ultimaSync && !r.pausaCota) {
+      estado.importouNaCarga = true;
+      for (let i = 0; i < 3 && (!r.ultimaSync || r.importando) && !r.pausaCota; i++) {
+        $('#status-sync').textContent = 'Importando seus emails…';
+        try { await chamar('sincronizarAgora'); } catch (e) { console.warn(e); break; }
+        r = await chamar('getDados');
+        aplicar(r);
+      }
+    }
     if (!r.operadorConfirmado) abrirOperador(r);
   }
 
