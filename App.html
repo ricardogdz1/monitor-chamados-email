@@ -43,6 +43,11 @@
   }
 
   // ---------- Período ----------
+  // Enquanto o ano é digitado o input já reporta datas como 0002-..., 0020-...; só aceita anos plausíveis
+  function dataCompleta(v) {
+    const ano = Number(String(v).slice(0, 4));
+    return !!v && ano >= 2000 && ano <= 2100;
+  }
   function deslocar(ref, delta) {
     const r = new Date(ref);
     if (estado.periodo === 'dia') r.setDate(r.getDate() + delta);
@@ -74,8 +79,8 @@
       case 'ano': ini = new Date(r.getFullYear(), 0, 1); fim = new Date(r.getFullYear() + 1, 0, 1); break;
       case 'custom': {
         const a = $('#dt-ini').value, b = $('#dt-fim').value;
-        ini = a ? new Date(a + 'T00:00:00') : null;
-        fim = b ? new Date(b + 'T00:00:00') : null;
+        ini = dataCompleta(a) ? new Date(a + 'T00:00:00') : null;
+        fim = dataCompleta(b) ? new Date(b + 'T00:00:00') : null;
         if (fim) fim.setDate(fim.getDate() + 1);
         break;
       }
@@ -521,7 +526,10 @@
   };
   $('#ant').onclick = () => mover(-1);
   $('#prox').onclick = () => mover(1);
-  $('#dt-ini').onchange = $('#dt-fim').onchange = render;
+  // Só redesenha quando o valor digitado forma uma data completa (ou o campo foi limpo)
+  $('#dt-ini').onchange = $('#dt-fim').onchange = e => {
+    if (!e.target.value || dataCompleta(e.target.value)) render();
+  };
   $('#campo-data').onchange = e => { estado.campo = e.target.value; render(); };
   $('#f-cliente').oninput = e => { estado.cliente = e.target.value; render(); };
   $('#f-operador').onchange = e => { estado.operador = e.target.value; try { localStorage.setItem('painel.operador', estado.operador); } catch (x) { /* sem storage */ } render(); };
