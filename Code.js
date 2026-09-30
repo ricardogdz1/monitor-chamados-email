@@ -71,6 +71,7 @@ function getDados() {
     });
   });
   const props = props_();
+  const pausaCota = Number(props.getProperty('PAUSA_COTA_ATE') || 0);
   return {
     chamados: lista,
     operador: eu.nome,
@@ -79,7 +80,7 @@ function getDados() {
     contagens: lerContagens_(),
     ultimaSync: Number(props.getProperty('ULTIMA_SYNC') || 0),
     importando: !!props.getProperty('OFFSET_BUSCA'),
-    planilhaUrl: planilha_().getUrl()
+    pausaCota: pausaCota > Date.now() ? pausaCota : 0
   };
 }
 

@@ -24,10 +24,17 @@
   const temaSistemaEscuro = () => !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
   const temaEscuro = () => raiz.dataset.theme ? raiz.dataset.theme === 'dark' : temaSistemaEscuro();
   const COR = { ouro: '#f0c21e', cinza: '#b3bac5', folha: '#8fb04a' };
+  const svg_ = d => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  const ICONE_SOL = svg_('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>');
+  const ICONE_LUA = svg_('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>');
   function aplicarTema(tema) {
     if (tema) raiz.dataset.theme = tema; else delete raiz.dataset.theme;
     COR.verde = temaEscuro() ? '#4f9a5a' : '#1f4d2b';
-    $('#btn-tema').textContent = temaEscuro() ? 'Tema claro' : 'Tema escuro';
+    // No escuro mostra o sol (ir para o claro); no claro, a lua
+    const b = $('#btn-tema');
+    b.innerHTML = temaEscuro() ? ICONE_SOL : ICONE_LUA;
+    b.title = temaEscuro() ? 'Mudar para tema claro' : 'Mudar para tema escuro';
+    b.setAttribute('aria-label', b.title);
   }
   let temaSalvo = null; try { temaSalvo = localStorage.getItem('painel.tema'); } catch (e) { /* sem storage */ }
   aplicarTema(temaSalvo);
@@ -514,9 +521,9 @@
       estado.contagem = ultimaContagem();
     }
     estado.carregado = true;
-    $('#link-planilha').href = r.planilhaUrl;
     $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
-      (r.importando ? ' · importação em andamento…' : '');
+      (r.importando ? ' · importação em andamento…' : '') +
+      (r.pausaCota ? ' · limite diário do Gmail atingido, nova tentativa após ' + fmtDataHora(r.pausaCota) : '');
     $('#status-sync').title = r.chamados.length + ' chamados seus na base';
     $('#btn-operador').textContent = r.operador || 'Definir operador';
     const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -526,14 +533,18 @@
 
   async function carregar() {
     let r = await chamar('getDados');
-    // Primeiro acesso: importa os emails do próprio Gmail antes de mostrar (em partes, se forem muitos)
-    for (let i = 0; i < 5 && (!r.ultimaSync || r.importando); i++) {
-      aplicar(r);
-      $('#status-sync').textContent = 'Importando seus emails…';
-      await chamar('sincronizarAgora');
-      r = await chamar('getDados');
-    }
     aplicar(r);
+    // Primeiro acesso: importa os emails do próprio Gmail (em partes, se forem muitos; o gatilho continua depois).
+    // Só uma vez por abertura da página, para não gastar a cota diária do Gmail.
+    if (!estado.importouNaCarga && !r.ultimaSync && !r.pausaCota) {
+      estado.importouNaCarga = true;
+      for (let i = 0; i < 3 && (!r.ultimaSync || r.importando) && !r.pausaCota; i++) {
+        $('#status-sync').textContent = 'Importando seus emails…';
+        try { await chamar('sincronizarAgora'); } catch (e) { console.warn(e); break; }
+        r = await chamar('getDados');
+        aplicar(r);
+      }
+    }
     if (!r.operadorConfirmado) abrirOperador(r);
   }
 
@@ -582,13 +593,6 @@
   $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').hidden = true; };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').hidden = true; });
   $('#btn-csv').onclick = exportarCsv;
-  $('#btn-sync').onclick = async () => {
-    const b = $('#btn-sync');
-    b.disabled = true; b.textContent = 'Sincronizando…';
-    try { const msg = await chamar('sincronizarAgora'); await carregar(); $('#status-sync').title = msg; }
-    catch (e) { alert('Erro ao sincronizar: ' + (e.message || e)); }
-    finally { b.disabled = false; b.textContent = 'Sincronizar'; }
-  };
 
   carregar().catch(e => { $('#status-sync').textContent = 'Erro ao carregar: ' + (e.message || e); });
 })();
