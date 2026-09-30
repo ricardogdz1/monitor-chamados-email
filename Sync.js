@@ -122,6 +122,27 @@ function reprocessarTudo() {
 }
 
 /**
+ * Relê os emails dos últimos dias sem apagar nada (os já processados são pulados).
+ * Use quando uma sincronização interrompida deixou emails para trás.
+ */
+function ressincronizarUltimosDias(dias) {
+  dias = dias || 2;
+  const lock = LockService.getUserLock();
+  lock.waitLock(30000); // não deixa uma sincronização em andamento sobrescrever o novo ponto de partida
+  try {
+    planilha_();
+    const props = props_();
+    props.setProperty('ULTIMA_SYNC', String(Date.now() - dias * 24 * 3600 * 1000));
+    props.deleteProperty('OFFSET_BUSCA');
+    props.deleteProperty('INICIO_BUSCA');
+    props.deleteProperty('PAUSA_COTA_ATE');
+  } finally {
+    lock.releaseLock();
+  }
+  return sincronizar();
+}
+
+/**
  * Agrupa os emails pelo padrão do assunto (número trocado por ####) e grava
  * 1 exemplo de cada padrão, com o que foi extraído, na aba "Diagnóstico".
  */

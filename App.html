@@ -383,6 +383,7 @@
   // ---------- Detalhe ----------
   async function abrirDetalhe(numero) {
     $('#modal').hidden = false;
+    $('#modal-conteudo').dataset.tela = 'detalhe';
     $('#modal-conteudo').innerHTML = '<p>Carregando chamado ' + esc(numero) + '…</p>';
     try {
       const d = await chamar('getDetalhe', numero);
@@ -449,6 +450,7 @@
         </div>`;
     }
     $('#modal').hidden = false;
+    $('#modal-conteudo').dataset.tela = 'encerrar';
     $('#modal-conteudo').innerHTML = `
       <h2 style="font-size:18px">Encerrar contagem</h2>
       ${primeira ? `<p>Ainda não há contagem registrada. Informe quando a contagem atual começou:</p>
@@ -484,13 +486,18 @@
 
   // ---------- Operador (quem é o usuário no DeskManager) ----------
   function abrirOperador(r) {
-    const ops = r.operadores || [];
+    // Ainda sem resposta do servidor (primeira carga em andamento ou com erro): explica em vez de não fazer nada
+    const ops = (r && r.operadores) || [];
+    const semOps = !r ? (estado.erroCarga ? 'Não foi possível carregar os seus dados: ' + esc(estado.erroCarga) : 'Carregando os seus dados, aguarde…')
+      : (r.importando || !r.ultimaSync) ? 'Importando os seus emails. A lista de operadores aparece aqui assim que terminar (o painel se atualiza sozinho).'
+      : 'Nenhum operador encontrado nos seus emails ainda.';
     $('#modal').hidden = false;
+    $('#modal-conteudo').dataset.tela = 'operador';
     $('#modal-conteudo').innerHTML = `
       <h2 style="font-size:18px">Seu nome de operador</h2>
       <p>O painel mostra apenas os chamados atendidos por você. Confirme o seu nome como operador no DeskManager:</p>
       ${ops.length ? `<p><select id="op-nome">${ops.map(o => `<option value="${esc(o)}"${o === r.operador ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></p>`
-        : '<p class="sub">Nenhum operador encontrado nos seus emails ainda. Sincronize e tente novamente.</p>'}
+        : `<p class="sub">${semOps}</p>`}
       <div class="acoes">${ops.length ? '<button class="b p" id="op-confirmar">Confirmar</button>' : ''}
         <button class="b" id="op-cancelar">Fechar</button></div>`;
     $('#op-cancelar').onclick = () => $('#modal').hidden = true;
@@ -546,6 +553,24 @@
       }
     }
     if (!r.operadorConfirmado) abrirOperador(r);
+    acompanharImportacao();
+  }
+
+  // Enquanto a importação continua pelo gatilho, relê os dados (só a planilha, sem gastar cota do Gmail)
+  function acompanharImportacao() {
+    const r = estado.resposta;
+    if (!r || (r.ultimaSync && !r.importando)) return;
+    setTimeout(async () => {
+      try {
+        const antes = (r.operadores || []).length;
+        const novo = await chamar('getDados');
+        aplicar(novo);
+        // Operadores apareceram: atualiza a janela de escolha se ela estiver aberta (ou abre, se ainda não confirmado)
+        const telaOperador = !$('#modal').hidden && $('#modal-conteudo').dataset.tela === 'operador';
+        if (!novo.operadorConfirmado && !antes && (novo.operadores || []).length && ($('#modal').hidden || telaOperador)) abrirOperador(novo);
+      } catch (e) { console.warn(e); }
+      acompanharImportacao();
+    }, 60 * 1000);
   }
 
   // ---------- Eventos ----------
@@ -576,7 +601,7 @@
   };
   $('#campo-data').onchange = e => { estado.campo = e.target.value; render(); };
   $('#f-cliente').oninput = e => { estado.cliente = e.target.value; render(); };
-  $('#btn-operador').onclick = () => estado.resposta && abrirOperador(estado.resposta);
+  $('#btn-operador').onclick = () => abrirOperador(estado.resposta);
   $('#nivel-classif').onchange = e => { estado.nivel = Number(e.target.value); render(); };
   $('#f-busca').oninput = e => { estado.busca = e.target.value; render(); };
   $('#t-chamados').onclick = e => {
@@ -594,6 +619,9 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').hidden = true; });
   $('#btn-csv').onclick = exportarCsv;
 
-  carregar().catch(e => { $('#status-sync').textContent = 'Erro ao carregar: ' + (e.message || e); });
+  carregar().catch(e => {
+    estado.erroCarga = e.message || String(e);
+    $('#status-sync').textContent = 'Erro ao carregar: ' + estado.erroCarga;
+  });
 })();
 </script>

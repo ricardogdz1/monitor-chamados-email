@@ -3,6 +3,9 @@
  */
 
 function doGet() {
+  // Na tela de consentimento o Google deixa desmarcar permissões; sem todas (Gmail, Planilhas,
+  // gatilhos), pede de novo as que faltam em vez de o painel falhar ao carregar.
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('Painel de Chamados')
