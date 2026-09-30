@@ -42,6 +42,9 @@ function sincronizar() {
 
     const ultimaSync = Number(props.getProperty('ULTIMA_SYNC') || 0);
     let offset = Number(props.getProperty('OFFSET_BUSCA') || 0);
+    // Início da primeira execução desta busca. Uma conversa que recebe email novo durante uma busca
+    // longa sobe para o topo e é pulada pelo offset; a próxima busca, a partir deste início, a relê.
+    const inicioBusca = offset ? Number(props.getProperty('INICIO_BUSCA') || inicio) : inicio;
 
     // Só os emails desde a última sincronização (com 1 h de margem), em segundos desde 1970
     let query = CONFIG.GMAIL_QUERY;
@@ -86,12 +89,14 @@ function sincronizar() {
     }
 
     if (terminou) {
-      props.setProperty('ULTIMA_SYNC', String(inicio));
+      props.setProperty('ULTIMA_SYNC', String(inicioBusca));
       props.deleteProperty('OFFSET_BUSCA');
+      props.deleteProperty('INICIO_BUSCA');
       props.deleteProperty('PAUSA_COTA_ATE');
     } else {
       // Importação grande (ou limite do Gmail): continua de onde parou na próxima execução
       props.setProperty('OFFSET_BUSCA', String(offset));
+      props.setProperty('INICIO_BUSCA', String(inicioBusca));
     }
     const resumo = novos.length + ' email(s) novo(s) processado(s)' +
       (erroCota ? ' — limite diário do Gmail atingido, continua mais tarde.' : terminou ? '.' : ' — continua na próxima execução.');
@@ -111,6 +116,7 @@ function reprocessarTudo() {
   const props = props_();
   props.deleteProperty('ULTIMA_SYNC');
   props.deleteProperty('OFFSET_BUSCA');
+  props.deleteProperty('INICIO_BUSCA');
   props.deleteProperty('PAUSA_COTA_ATE');
   return sincronizar();
 }

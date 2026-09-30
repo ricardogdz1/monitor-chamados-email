@@ -80,8 +80,7 @@ function getDados() {
     contagens: lerContagens_(),
     ultimaSync: Number(props.getProperty('ULTIMA_SYNC') || 0),
     importando: !!props.getProperty('OFFSET_BUSCA'),
-    pausaCota: pausaCota > Date.now() ? pausaCota : 0,
-    planilhaUrl: planilha_().getUrl()
+    pausaCota: pausaCota > Date.now() ? pausaCota : 0
   };
 }
 
