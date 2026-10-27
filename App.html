@@ -593,7 +593,8 @@
     $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
       (r.importando ? ' · importação em andamento…' : '') +
       (r.pausaCota ? ' · limite diário do Gmail atingido, nova tentativa após ' + fmtDataHora(r.pausaCota) : '');
-    $('#status-sync').title = r.chamados.length + ' chamados seus na base';
+    // O texto pode ser cortado na barra: a dica mostra a mensagem inteira
+    $('#status-sync').title = $('#status-sync').textContent + '\n' + r.chamados.length + ' chamados seus na base';
     $('#btn-operador').textContent = r.operador || 'Definir operador';
     const clientes = [...new Set(estado.dados.map(c => c.cl).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     $('#lista-clientes').innerHTML = clientes.map(c => `<option value="${esc(c)}">`).join('');
