@@ -80,7 +80,6 @@ function getDados() {
     operador: eu.nome,
     operadorConfirmado: eu.confirmado,
     operadores: Object.keys(operadores).sort((a, b) => a.localeCompare(b)),
-    contagens: lerContagens_(),
     ultimaSync: Number(props.getProperty('ULTIMA_SYNC') || 0),
     importando: !!props.getProperty('OFFSET_BUSCA'),
     pausaCota: pausaCota > Date.now() ? pausaCota : 0

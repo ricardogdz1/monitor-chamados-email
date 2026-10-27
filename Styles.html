@@ -134,10 +134,26 @@
   .abas { margin: 14px 0 8px; flex-wrap: wrap; display: inline-flex; }
   pre.resumo { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 4px; max-height: 520px; overflow: auto; }
 
+  /* Relatório */
+  .rel-cab { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 0 28px 14px 0; }
+  .modal-caixa .rel-cab h2 { margin: 2px 0; }
+  .modal-caixa .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .modal-caixa .kpi .v { font-size: 24px; }
+  .grade-rel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+  tr.parcial td { color: var(--sub); }
+  @media print {
+    body { background: #fff; }
+    .nav, .corpo, .fechar, .rel-acoes { display: none !important; }
+    .modal { position: static; background: none; padding: 0; overflow: visible; }
+    .modal-caixa { width: 100%; border: 0; padding: 0; }
+    .tabela-wrap { max-height: none; overflow: visible; }
+    .card { break-inside: avoid; }
+  }
+
   @media (max-width: 1100px) { .grade3 { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 800px) {
     .corpo { padding: 12px; }
-    .grade2, .grade3 { grid-template-columns: 1fr; }
+    .grade2, .grade3, .grade-rel { grid-template-columns: 1fr; }
     .nav { position: static; gap: 14px; padding: 8px 12px; }
     .nav .links { gap: 14px; }
     .nav .dir { margin-left: 0; }

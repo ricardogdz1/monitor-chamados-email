@@ -4,7 +4,7 @@
 
   // ---------- Estado ----------
   const estado = {
-    dados: [], contagens: [], contagem: 0, periodo: 'mes', ref: new Date(), campo: 'da',
+    dados: [], periodo: 'mes', ref: new Date(), campo: 'da',
     cliente: '', busca: '', nivel: 2, ordem: { col: 'data', dir: -1 }, graficos: {}
   };
   const $ = s => document.querySelector(s);
@@ -70,13 +70,6 @@
     if (desloc && ['tudo', 'custom'].includes(estado.periodo)) return null;
     let ini, fim;
     switch (estado.periodo) {
-      case 'contagem': {
-        const k = estado.contagens, i = estado.contagem + desloc;
-        if (i < 0 || k[i] == null) return desloc ? null : { ini: null, fim: null };
-        ini = k[i] != null ? new Date(k[i]) : null;
-        fim = k[i + 1] != null ? new Date(k[i + 1]) : null;
-        break;
-      }
       case 'dia': ini = r; fim = new Date(r); fim.setDate(fim.getDate() + 1); break;
       case 'semana': {
         ini = new Date(r); ini.setDate(r.getDate() - ((r.getDay() + 6) % 7));
@@ -102,13 +95,6 @@
   function rotuloPeriodo({ ini, fim }) {
     const r = estado.ref;
     switch (estado.periodo) {
-      case 'contagem': {
-        if (!ini) return { pre: 'Contagem', titulo: 'Início ainda não registrado' };
-        const n = estado.contagem + 1;
-        return { pre: 'Contagem ' + n + (fim ? ' · encerrada' : ' · em andamento'),
-                 titulo: fmtData(ini) + ' – ' + (fim ? fmtData(fim) : 'hoje'),
-                 dica: fmtDataHora(ini) + ' – ' + (fim ? fmtDataHora(fim) : 'agora') };
-      }
       case 'dia': return { pre: 'Dia', titulo: maiuscula(r.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })) };
       case 'semana': { const f = new Date(fim); f.setDate(f.getDate() - 1); return { pre: 'Semana', titulo: fmtData(ini) + ' – ' + fmtData(f) }; }
       case 'mes': return { pre: 'Mês', titulo: maiuscula(r.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })) };
@@ -124,20 +110,12 @@
 
   // Nome do período anterior, usado na comparação dos números
   function nomeAnterior() {
-    return { contagem: 'contagem ' + estado.contagem, dia: 'dia anterior', semana: 'semana anterior',
-             mes: 'mês anterior', ano: 'ano anterior' }[estado.periodo];
+    return { dia: 'dia anterior', semana: 'semana anterior', mes: 'mês anterior', ano: 'ano anterior' }[estado.periodo];
   }
 
   function mover(delta) {
-    if (estado.periodo === 'contagem') {
-      estado.contagem = Math.max(0, Math.min(ultimaContagem(), estado.contagem + delta));
-      return render();
-    }
     estado.ref = deslocar(estado.ref, delta); render();
   }
-
-  // Índice da contagem atual (em aberto)
-  const ultimaContagem = () => Math.max(0, estado.contagens.length - 1);
 
   // Data de referência do chamado conforme o campo escolhido (com alternativas se vazio)
   function dataRef(c) {
@@ -167,21 +145,9 @@
     const rot = rotuloPeriodo(iv);
     $('#pre-periodo').textContent = rot.pre;
     $('#rotulo-periodo').textContent = rot.titulo;
-    $('#rotulo-periodo').title = rot.dica || '';
     $('#nav-periodo').hidden = ['tudo', 'custom'].includes(estado.periodo);
     $('#custom').hidden = estado.periodo !== 'custom';
     document.querySelectorAll('#periodos button').forEach(b => b.classList.toggle('ativo', b.dataset.p === estado.periodo));
-    if (estado.periodo === 'contagem') {
-      const n = estado.contagem + 1;
-      $('#ant').hidden = estado.contagem <= 0;
-      $('#prox').hidden = estado.contagem >= ultimaContagem();
-      $('#ant').textContent = '‹ Contagem ' + (n - 1);
-      $('#prox').textContent = 'Contagem ' + (n + 1) + ' ›';
-    } else {
-      $('#ant').hidden = $('#prox').hidden = false;
-      $('#ant').textContent = '‹ Anterior';
-      $('#prox').textContent = 'Próximo ›';
-    }
 
     const lista = filtrar(iv);
     const ivAnt = intervalo(-1);
@@ -261,11 +227,6 @@
     // Granularidade: hora (dia), dia (semana/mês/≤62 dias), mês (demais)
     let chaves = [], rotulos = [], chaveDe;
     const p = estado.periodo;
-    // Contagens começam/terminam em qualquer horário: o gráfico usa dias inteiros (até hoje, se em aberto)
-    if (p === 'contagem' && ini) {
-      ini = new Date(ini); ini.setHours(0, 0, 0, 0);
-      fim = new Date(fim || Date.now()); if (fim.getHours() || fim.getMinutes() || fim.getSeconds()) { fim.setHours(0, 0, 0, 0); fim.setDate(fim.getDate() + 1); }
-    }
     const dias = ini && fim ? (fim - ini) / 864e5 : null;
     if (p === 'dia') {
       for (let h = 0; h < 24; h++) { chaves.push(h); rotulos.push(h + 'h'); }
@@ -419,69 +380,179 @@
     }
   }
 
-  // ---------- CSV ----------
-  function exportarCsv() {
-    const lista = filtrar();
-    const cab = ['Numero', 'Status', 'Cliente', 'Solicitante', 'Operador', 'Grupo', 'Assunto', 'Abertura', 'Resolucao', 'Avaliacao', 'Nota atendimento', 'Nota sistema', 'Resolvido p/ cliente', 'Comentario'];
-    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const linhas = lista.map(c => [c.n, c.st, c.cl, c.so, c.op, c.gr, c.as, fmtDataHora(c.da), fmtDataHora(c.dr), fmtDataHora(c.dv), c.na, c.ns, c.rc, c.co].map(q).join(';'));
-    const blob = new Blob(['﻿' + [cab.join(';')].concat(linhas).join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'chamados.csv'; a.click();
+  // ---------- Relatório ----------
+  const mediana = arr => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const pct = (a, b) => b ? Math.round(100 * a / b) : null;
+  const fmtPct = v => v == null ? '–' : v + '%';
+  const fmtDuracao = h => h == null ? '–' : h < 48 ? fmtMedia(h) + ' h' : fmtMedia(h / 24) + ' dias';
+  const horasResolucao = c => c.da && c.dr && c.dr >= c.da ? (c.dr - c.da) / 36e5 : null;
+  const indiceMes = d => d.getFullYear() * 12 + d.getMonth();
+  const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+
+  // Chave de cada agrupamento: nº do mês/semestre/ano; o grupo k cobre os meses [k*meses, (k+1)*meses)
+  const AGRUPAR = {
+    mes: { nome: 'mês', plural: 'meses', titulo: 'Mensal', meses: 1, rotulo: k => MESES[k % 12] + '/' + String(Math.floor(k / 12)).slice(2) },
+    semestre: { nome: 'semestre', plural: 'semestres', titulo: 'Semestral', meses: 6, rotulo: k => (k % 2 + 1) + 'º sem/' + String(Math.floor(k / 2)).slice(2) },
+    ano: { nome: 'ano', plural: 'anos', titulo: 'Anual', meses: 12, rotulo: k => String(k) }
+  };
+
+  function resumoGrupo(itens) {
+    const av = itens.filter(c => c.na != null || c.ns != null);
+    const notas = av.map(c => c.na).filter(v => v != null);
+    const comRc = itens.filter(c => c.rc);
+    const res = itens.filter(resolvido).length;
+    return {
+      total: itens.length, resolvidos: res, avaliacoes: av.length,
+      na: media(notas), ns: media(av.map(c => c.ns).filter(v => v != null)),
+      horas: mediana(itens.map(horasResolucao).filter(v => v != null)),
+      taxaAv: pct(av.length, res),
+      satisfeitos: pct(notas.filter(n => n >= 9).length, notas.length),
+      insatisfeitos: pct(notas.filter(n => n <= 6).length, notas.length),
+      rc: pct(comRc.filter(c => /^resolvido/i.test(c.rc)).length, comRc.length)
+    };
   }
 
-  // ---------- Encerrar contagem ----------
-  function abrirEncerrar() {
-    const atual = estado.contagens[estado.contagens.length - 1];
-    const primeira = atual == null;
-    const agora = new Date();
-    const local = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
-    let resumo = '';
-    if (!primeira) {
-      const doCiclo = campo => estado.dados.filter(c => c[campo] && c[campo] >= atual);
-      const av = doCiclo('dv').filter(c => c.na != null || c.ns != null);
-      resumo = `<p>Contagem atual: desde <b>${fmtDataHora(atual)}</b></p>
-        <div class="det-grid">
-          <div><b>Chamados abertos</b>${doCiclo('da').length}</div>
-          <div><b>Chamados resolvidos</b>${doCiclo('dr').filter(resolvido).length}</div>
-          <div><b>Avaliações</b>${av.length}</div>
-          <div><b>Nota atendimento</b>${fmtMedia(media(av.map(c => c.na).filter(v => v != null)))}</div>
-          <div><b>Nota sistema</b>${fmtMedia(media(av.map(c => c.ns).filter(v => v != null)))}</div>
-        </div>`;
+  // Do primeiro chamado até hoje, incluindo períodos sem chamados. O período em andamento e o primeiro
+  // (o histórico começa no meio dele, quando os emails passaram a ser importados) ficam fora das médias.
+  function agrupar(lista, g) {
+    const ag = AGRUPAR[g], chave = mesIdx => Math.floor(mesIdx / ag.meses);
+    const hoje = indiceMes(new Date());
+    const ts = lista.map(dataRef);
+    const inicio = ts.length ? indiceMes(new Date(Math.min(...ts))) : hoje;
+    const grupos = [];
+    for (let k = chave(inicio); k <= chave(hoje); k++) {
+      const de = Math.max(k * ag.meses, inicio), ate = Math.min((k + 1) * ag.meses - 1, hoje);
+      grupos.push({ k, rotulo: ag.rotulo(k), meses: ate - de + 1, parcial: k === chave(inicio) || k === chave(hoje), itens: [] });
     }
+    lista.forEach(c => { const gr = grupos[chave(indiceMes(new Date(dataRef(c)))) - chave(inicio)]; if (gr) gr.itens.push(c); });
+    return grupos.map(gr => Object.assign(gr, resumoGrupo(gr.itens)));
+  }
+
+  // Média de chamados por mês/semestre/ano, só com períodos completos (senão, estimada pela média mensal)
+  function mediaChamados(lista, g) {
+    const ag = AGRUPAR[g], gs = agrupar(lista, g), comp = gs.filter(x => !x.parcial);
+    if (comp.length) return { v: media(comp.map(x => x.total)), d: `${comp.length} ${comp.length > 1 ? ag.plural : ag.nome} completo${comp.length > 1 ? 's' : ''}` };
+    if (g === 'mes') return { v: media(gs.map(x => x.total / x.meses)), d: 'nenhum mês completo ainda' };
+    return { v: mediaChamados(lista, 'mes').v * ag.meses, d: 'estimativa pela média mensal' };
+  }
+
+  function abrirRelatorio(g) {
+    const lista = filtrar({ ini: null, fim: null });
+    const ag = AGRUPAR[g], grupos = agrupar(lista, g), geral = resumoGrupo(lista);
+    const medias = ['mes', 'semestre', 'ano'].map(x => [x, mediaChamados(lista, x)]);
+    const volMedio = medias.find(([x]) => x === g)[1].v;
+    const campo = { da: 'abertura', dr: 'resolução', dv: 'avaliação' }[estado.campo];
+
     $('#modal').hidden = false;
-    $('#modal-conteudo').dataset.tela = 'encerrar';
+    $('#modal-conteudo').dataset.tela = 'relatorio';
+    const kpi = (cls, l, v, d) => `<div class="card kpi ${cls}"><div class="pre">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
+    const fmtQtd = v => v == null ? '–' : v >= 10 ? String(Math.round(v)) : fmtMedia(v);
     $('#modal-conteudo').innerHTML = `
-      <h2 style="font-size:18px">Encerrar contagem</h2>
-      ${primeira ? `<p>Ainda não há contagem registrada. Informe quando a contagem atual começou:</p>
-        <p><input type="datetime-local" id="enc-inicio" max="${local(agora)}"></p>` : resumo}
-      <p>A contagem atual será encerrada <b>agora (${fmtDataHora(agora)})</b> e uma nova contagem começa no mesmo instante.
-        Chamados e avaliações a partir de agora entram na nova contagem.</p>
-      <p class="sub">Se encerrar por engano, corrija a aba "Contagens" da planilha.</p>
-      <div class="acoes"><button class="b p" id="enc-confirmar">Encerrar e iniciar nova contagem</button>
-        <button class="b" id="enc-cancelar">Cancelar</button></div>`;
-    $('#enc-cancelar').onclick = () => $('#modal').hidden = true;
-    $('#enc-confirmar').onclick = async () => {
-      let inicio = null;
-      if (primeira) {
-        const v = $('#enc-inicio').value;
-        if (!v) return alert('Informe o início da contagem atual.');
-        inicio = new Date(v).getTime();
-      }
-      const b = $('#enc-confirmar');
-      b.disabled = true; b.textContent = 'Encerrando…';
-      try {
-        estado.contagens = await chamar('encerrarContagem', inicio);
-        // Mostra a contagem que acabou de ser encerrada, com os números finais
-        estado.periodo = 'contagem';
-        estado.contagem = Math.max(0, estado.contagens.length - 2);
-        $('#modal').hidden = true;
-        render();
-      } catch (e) {
-        alert('Erro ao encerrar: ' + (e.message || e));
-        b.disabled = false; b.textContent = 'Encerrar e iniciar nova contagem';
-      }
-    };
+      <div class="rel-cab">
+        <div><div class="pre">Relatório de atendimento</div>
+          <h2>Todo o histórico${estado.cliente.trim() ? ' · ' + esc(estado.cliente.trim()) : ''}</h2>
+          <div class="sub">${lista.length} chamados · agrupados pela data de ${campo}${estado.busca.trim() ? ' · busca “' + esc(estado.busca.trim()) + '”' : ''}</div></div>
+        <div class="btns rel-acoes">
+          <div class="seg" id="rel-agrup">${Object.keys(AGRUPAR).map(x => `<button data-g="${x}" class="${x === g ? 'ativo' : ''}">${AGRUPAR[x].titulo}</button>`).join('')}</div>
+          <button class="b" id="rel-imprimir">Imprimir / PDF</button>
+        </div>
+      </div>
+      <section class="kpis">
+        ${medias.map(([x, m]) => kpi('', 'Chamados por ' + AGRUPAR[x].nome, fmtQtd(m.v), 'média · ' + m.d)).join('')}
+        ${kpi('destaque', 'Nota atendimento', fmtMedia(geral.na), `${fmtPct(geral.satisfeitos)} notas 9–10 · ${fmtPct(geral.insatisfeitos)} até 6`)}
+        ${kpi('', 'Nota sistema ERP', fmtMedia(geral.ns), 'média de 1 a 10')}
+        ${kpi('', 'Tempo de resolução', fmtDuracao(geral.horas), 'mediana, da abertura à resolução')}
+        ${kpi('', 'Taxa de avaliação', fmtPct(geral.taxaAv), `${geral.avaliacoes} avaliações de ${geral.resolvidos} resolvidos`)}
+        ${kpi('', 'Resolvido p/ cliente', fmtPct(geral.rc), 'segundo a avaliação do cliente')}
+      </section>
+      <div class="grade-rel">
+        <div class="card"><div class="cab"><h2>Chamados por ${ag.nome}</h2><span class="sub">tracejado: média · amarelo: período incompleto</span></div>
+          <div class="cc"><div class="cv"><canvas id="gr-volume"></canvas></div></div></div>
+        <div class="card"><div class="cab"><h2>Nota média por ${ag.nome}</h2></div>
+          <div class="cc"><div class="cv"><canvas id="gr-notas"></canvas></div></div></div>
+        <div class="card"><div class="cab"><h2>Satisfação por ${ag.nome}</h2><span class="sub">% das avaliações / dos resolvidos</span></div>
+          <div class="cc"><div class="cv"><canvas id="gr-satisfacao"></canvas></div></div></div>
+        <div class="card"><div class="cab"><h2>Tempo de resolução por ${ag.nome}</h2><span class="sub">mediana</span></div>
+          <div class="cc"><div class="cv"><canvas id="gr-tempo"></canvas></div></div></div>
+        <div class="card"><div class="cab"><h2>Aberturas por dia da semana</h2></div>
+          <div class="cc"><div class="cv"><canvas id="gr-semana"></canvas></div></div></div>
+        <div class="card"><div class="cab"><h2>Aberturas por hora do dia</h2></div>
+          <div class="cc"><div class="cv"><canvas id="gr-hora"></canvas></div></div></div>
+      </div>
+      <section class="card">
+        <div class="cab"><h2>Resumo por ${ag.nome}</h2></div>
+        <div class="tabela-wrap"><table id="t-relatorio"></table></div>
+      </section>`;
+
+    const rotulos = grupos.map(x => x.rotulo + (x.parcial ? '*' : ''));
+    const base = { animation: false, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } };
+    const linha = (label, data, cor) => ({ type: 'line', label, data, borderColor: cor, backgroundColor: cor, tension: .25, spanGaps: true, pointRadius: 3 });
+
+    grafico('gr-volume', {
+      type: 'bar',
+      data: { labels: rotulos, datasets: [
+        { label: 'Chamados', data: grupos.map(x => x.total), backgroundColor: grupos.map(x => x.parcial ? COR.ouro : COR.verde), borderRadius: 2, order: 2 },
+        Object.assign(linha('Média por ' + ag.nome, grupos.map(() => Math.round(10 * volMedio) / 10), COR.cinza), { borderDash: [6, 4], pointRadius: 0, order: 1 })
+      ] },
+      options: Object.assign({}, base, { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } })
+    });
+    grafico('gr-notas', {
+      type: 'line',
+      data: { labels: rotulos, datasets: [linha('Atendimento', grupos.map(x => x.na), COR.verde), linha('Sistema ERP', grupos.map(x => x.ns), COR.folha)] },
+      options: Object.assign({}, base, { scales: { y: { min: 0, max: 10 }, x: { grid: { display: false } } } })
+    });
+    grafico('gr-satisfacao', {
+      type: 'line',
+      data: { labels: rotulos, datasets: [
+        linha('Notas 9–10', grupos.map(x => x.satisfeitos), COR.verde),
+        linha('Notas até 6', grupos.map(x => x.insatisfeitos), '#d63939'),
+        linha('Taxa de avaliação', grupos.map(x => x.taxaAv), COR.ouro)
+      ] },
+      options: Object.assign({}, base, { scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { grid: { display: false } } } })
+    });
+    // Escala em dias quando as resoluções passam de 3 dias
+    const emDias = Math.max(0, ...grupos.map(x => x.horas || 0)) > 72;
+    grafico('gr-tempo', {
+      type: 'bar',
+      data: { labels: rotulos, datasets: [{ label: emDias ? 'Dias' : 'Horas', data: grupos.map(x => x.horas == null ? null : Math.round(10 * (emDias ? x.horas / 24 : x.horas)) / 10), backgroundColor: COR.folha, borderRadius: 2 }] },
+      options: Object.assign({}, base, { plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: emDias ? 'dias' : 'horas' } }, x: { grid: { display: false } } } })
+    });
+    const abertos = lista.filter(c => c.da).map(c => new Date(c.da));
+    const distribuir = (n, f) => { const a = Array(n).fill(0); abertos.forEach(d => a[f(d)]++); return a; };
+    const barras = (id, labels, data) => grafico(id, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Chamados', data, backgroundColor: COR.verde, borderRadius: 2 }] },
+      options: Object.assign({}, base, { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } })
+    });
+    barras('gr-semana', DIAS_SEMANA, distribuir(7, d => (d.getDay() + 6) % 7));
+    barras('gr-hora', Array.from({ length: 24 }, (_, h) => h + 'h'), distribuir(24, d => d.getHours()));
+
+    const nota = v => `<span class="nota ${classeNota(v)}">${fmtMedia(v)}</span>`;
+    const porMes = g !== 'mes';
+    $('#t-relatorio').innerHTML = `<thead><tr><th>Período</th><th class="num">Chamados</th>${porMes ? '<th class="num">Média/mês</th>' : ''}
+      <th class="num">Resolvidos</th><th class="num">Avaliações</th><th class="num">Taxa aval.</th><th class="num">Nota atend.</th>
+      <th class="num">Nota sist.</th><th class="num">Notas 9–10</th><th class="num">Resolução</th></tr></thead><tbody>` +
+      grupos.slice().reverse().map(x => `<tr class="${x.parcial ? 'parcial' : ''}"><td>${x.rotulo}${x.parcial ? ' <span class="sub">(incompleto)</span>' : ''}</td>
+        <td class="num">${x.total}</td>${porMes ? `<td class="num">${fmtMedia(x.total / x.meses)}</td>` : ''}
+        <td class="num">${x.resolvidos}</td><td class="num">${x.avaliacoes}</td><td class="num">${fmtPct(x.taxaAv)}</td>
+        <td class="num">${nota(x.na)}</td><td class="num">${nota(x.ns)}</td><td class="num">${fmtPct(x.satisfeitos)}</td>
+        <td class="num">${fmtDuracao(x.horas)}</td></tr>`).join('') + '</tbody>';
+
+    document.querySelectorAll('#rel-agrup button').forEach(b => b.onclick = () => abrirRelatorio(b.dataset.g));
+    $('#rel-imprimir').onclick = () => imprimirRelatorio(g);
+  }
+
+  // Impressão sempre no tema claro (fundo escuro some no papel)
+  function imprimirRelatorio(g) {
+    const escuro = temaEscuro(), tema = raiz.dataset.theme;
+    if (escuro) { aplicarTema('light'); abrirRelatorio(g); }
+    window.print();
+    if (escuro) { aplicarTema(tema); abrirRelatorio(g); }
   }
 
   // ---------- Operador (quem é o usuário no DeskManager) ----------
@@ -519,15 +590,6 @@
   function aplicar(r) {
     estado.resposta = r;
     estado.dados = r.chamados;
-    const eraUltima = estado.contagem >= ultimaContagem();
-    estado.contagens = r.contagens || [];
-    if (!estado.carregado) {
-      if (estado.contagens.length) estado.periodo = 'contagem';
-      estado.contagem = ultimaContagem();
-    } else if (eraUltima) {
-      estado.contagem = ultimaContagem();
-    }
-    estado.carregado = true;
     $('#status-sync').textContent = (r.ultimaSync ? 'Sincronizado em ' + fmtDataHora(r.ultimaSync) : 'Ainda não sincronizado') +
       (r.importando ? ' · importação em andamento…' : '') +
       (r.pausaCota ? ' · limite diário do Gmail atingido, nova tentativa após ' + fmtDataHora(r.pausaCota) : '');
@@ -575,10 +637,9 @@
 
   // ---------- Eventos ----------
   document.querySelectorAll('#periodos button').forEach(b => b.onclick = () => {
-    if (b.dataset.p === 'contagem' && estado.periodo !== 'contagem') estado.contagem = ultimaContagem();
     estado.periodo = b.dataset.p; render();
   });
-  $('#btn-encerrar').onclick = abrirEncerrar;
+  $('#btn-relatorio').onclick = () => abrirRelatorio('mes');
   // Links da barra: rolagem via JS (links com # recarregam a página dentro do Apps Script)
   document.querySelectorAll('.nav .links a').forEach(a => a.onclick = e => {
     e.preventDefault();
@@ -617,7 +678,6 @@
   $('#fechar-modal').onclick = () => $('#modal').hidden = true;
   $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').hidden = true; };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').hidden = true; });
-  $('#btn-csv').onclick = exportarCsv;
 
   carregar().catch(e => {
     estado.erroCarga = e.message || String(e);
