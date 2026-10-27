@@ -170,3 +170,97 @@ function diagnosticar() {
   Logger.log('Veja a aba Diagnóstico: ' + ss.getUrl());
   linhas.forEach(l => Logger.log(l[0] + 'x | ' + l[1] + ' | ' + l[2] + ' | ' + l[3]));
 }
+
+const ABA_DIAGNOSTICO_DIA = 'Diagnóstico por dia';
+
+/**
+ * Compara, dia a dia, o que está no Gmail com o que está na planilha e no painel.
+ * Só lê os dados (não altera chamados nem processados); o resultado vai para a aba
+ * "Diagnóstico por dia". Sem parâmetros, analisa do dia 1 do mês atual até hoje.
+ *
+ * Colunas por dia (dia = primeiro email do chamado no Gmail):
+ *   gmail          -> chamados com email nesse dia
+ *   naPlanilha     -> desses, quantos existem na aba Chamados
+ *   noPainel       -> desses, quantos passam pelo filtro de operador (aparecem no painel)
+ *   naoProcessados -> chamados com algum email que não está na aba Processados
+ * E, pela data de abertura gravada na planilha:
+ *   planilhaAbertura / painelAbertura -> chamados abertos nesse dia (na planilha / no painel)
+ */
+function diagnosticarPorDia(inicio, fim) {
+  const fuso = CONFIG.FUSO;
+  const hoje = new Date();
+  inicio = inicio ? new Date(inicio) : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  fim = fim ? new Date(fim) : new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 1);
+  const dia = d => Utilities.formatDate(d, fuso, 'yyyy-MM-dd');
+
+  const mapa = lerChamados_();
+  const processados = lerProcessados_();
+  const eu = operadorDoUsuario_(mapa).nome;
+
+  // Gmail: primeiro email de cada chamado no período e se algum email ficou sem processar.
+  // A busca por data do Gmail não usa o nosso fuso: busca 1 dia a mais de cada lado e filtra abaixo.
+  const umDia = 24 * 3600 * 1000;
+  const query = CONFIG.GMAIL_QUERY +
+    ' after:' + Utilities.formatDate(new Date(inicio.getTime() - umDia), fuso, 'yyyy/MM/dd') +
+    ' before:' + Utilities.formatDate(new Date(fim.getTime() + umDia), fuso, 'yyyy/MM/dd');
+  const doGmail = {};
+  const t0 = Date.now();
+  let offset = 0, incompleto = false;
+  while (true) {
+    if (Date.now() - t0 > CONFIG.TEMPO_MAX_EXECUCAO_MS) { incompleto = true; break; }
+    const threads = GmailApp.search(query, offset, 100);
+    if (!threads.length) break;
+    GmailApp.getMessagesForThreads(threads).forEach(lista => lista.forEach(msg => {
+      const numero = extrairNumero_(msg.getSubject());
+      const data = msg.getDate();
+      if (!numero || data < inicio || data >= fim) return;
+      const g = doGmail[numero] || (doGmail[numero] = { primeiro: data, naoProcessados: 0 });
+      if (data < g.primeiro) g.primeiro = data;
+      if (!processados[msg.getId()]) g.naoProcessados++;
+    }));
+    offset += threads.length;
+  }
+
+  const dias = {};
+  const linhaDia = d => dias[d] || (dias[d] = { gmail: 0, naPlanilha: 0, noPainel: 0, naoProcessados: 0, planilhaAbertura: 0, painelAbertura: 0 });
+  for (let d = new Date(inicio); d < fim; d.setDate(d.getDate() + 1)) linhaDia(dia(d));
+
+  const fora = []; // chamados do Gmail que não aparecem no painel
+  Object.keys(doGmail).forEach(numero => {
+    const g = doGmail[numero], c = mapa[numero], r = linhaDia(dia(g.primeiro));
+    r.gmail++;
+    if (g.naoProcessados) r.naoProcessados++;
+    if (c) r.naPlanilha++;
+    if (c && ehMeu_(c, eu)) { r.noPainel++; return; }
+    fora.push([numero, dia(g.primeiro), c ? 'na planilha, outro operador' : 'fora da planilha',
+               c ? txt_(c.operador) : '', c && c.dataAbertura instanceof Date ? dia(c.dataAbertura) : '', g.naoProcessados]);
+  });
+  Object.keys(mapa).forEach(numero => {
+    const c = mapa[numero];
+    if (!(c.dataAbertura instanceof Date) || c.dataAbertura < inicio || c.dataAbertura >= fim) return;
+    const r = linhaDia(dia(c.dataAbertura));
+    r.planilhaAbertura++;
+    if (ehMeu_(c, eu)) r.painelAbertura++;
+  });
+
+  const ss = planilha_();
+  const aba = ss.getSheetByName(ABA_DIAGNOSTICO_DIA) || ss.insertSheet(ABA_DIAGNOSTICO_DIA);
+  aba.clear();
+  const cab = ['dia', 'gmail', 'naPlanilha', 'noPainel', 'naoProcessados', 'planilhaAbertura', 'painelAbertura'];
+  const linhas = Object.keys(dias).sort().map(d => [d].concat(cab.slice(1).map(k => dias[d][k])));
+  aba.getRange(1, 1, 1, cab.length).setValues([cab]).setFontWeight('bold');
+  aba.getRange(2, 1, linhas.length, cab.length).setValues(linhas);
+
+  const col = cab.length + 2;
+  aba.getRange(1, col).setValue('Operador do painel: ' + (eu || '(não identificado)') +
+    (incompleto ? ' — ATENÇÃO: tempo esgotado, Gmail lido só em parte' : '')).setFontWeight('bold');
+  const cabFora = ['chamado', 'diaGmail', 'situação', 'operador na planilha', 'abertura na planilha', 'emails não processados'];
+  aba.getRange(3, col, 1, cabFora.length).setValues([cabFora]).setFontWeight('bold');
+  fora.sort((a, b) => a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+  if (fora.length) aba.getRange(4, col, fora.length, cabFora.length).setValues(fora);
+
+  Logger.log('Operador do painel: ' + eu + (incompleto ? ' (Gmail lido só em parte)' : ''));
+  Logger.log(cab.join(' | '));
+  linhas.forEach(l => Logger.log(l.join(' | ')));
+  Logger.log(fora.length + ' chamado(s) do Gmail fora do painel. Detalhes na aba "' + ABA_DIAGNOSTICO_DIA + '": ' + ss.getUrl());
+}

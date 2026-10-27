@@ -78,16 +78,21 @@ function lerChamados_() {
 
 function salvarChamados_(mapa) {
   const aba = planilha_().getSheetByName(ABA_CHAMADOS);
-  if (aba.getLastRow() > 0) aba.getRange(1, 1, aba.getLastRow(), aba.getLastColumn()).clearContent();
-  aba.getRange(1, 1, 1, COLUNAS.length).setValues([COLUNAS]).setFontWeight('bold');
   const linhas = Object.keys(mapa).sort().map(n => COLUNAS.map(c => {
     const v = mapa[n][c];
     return v === undefined || v === null ? '' : v;
   }));
+  // Grava por cima, sem apagar antes: se a execução for interrompida no meio da gravação,
+  // os chamados já salvos continuam na aba (apagar antes fazia a aba ficar vazia e os chamados se perderem)
+  aba.getRange(1, 1, 1, COLUNAS.length).setValues([COLUNAS]).setFontWeight('bold');
   if (linhas.length) {
     aba.getRange(2, 1, linhas.length, 1).setNumberFormat('@'); // número do chamado como texto
     aba.getRange(2, 1, linhas.length, COLUNAS.length).setValues(linhas);
   }
+  // Depois, limpa só o que sobrou de uma gravação anterior (linhas ou colunas a mais)
+  const ultLinha = aba.getLastRow(), ultCol = aba.getLastColumn();
+  if (ultLinha > linhas.length + 1) aba.getRange(linhas.length + 2, 1, ultLinha - linhas.length - 1, ultCol).clearContent();
+  if (ultCol > COLUNAS.length) aba.getRange(1, COLUNAS.length + 1, ultLinha, ultCol - COLUNAS.length).clearContent();
 }
 
 function lerProcessados_() {
